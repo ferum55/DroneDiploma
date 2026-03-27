@@ -7,7 +7,7 @@ AFPVDronePawn::AFPVDronePawn()
     ArmLength = 20.f;
 
     MaxMotorThrust = 38.f;
-    MotorTorqueCoeff = 0.12f;
+    MotorTorqueCoeff = 1000*0.12f;
 
     MaxPitchRate = 180.f;  // було 220
     MaxRollRate = 180.f;  // було 220
@@ -159,6 +159,56 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
 //    }
 //}
 
+//void AFPVDronePawn::ApplyMotorForces()
+//{
+//    UStaticMeshComponent* Mesh = GetPlaneMesh();
+//    if (!Mesh || Motors.Num() != 4)
+//    {
+//        return;
+//    }
+//
+//    const FVector UpVector = Mesh->GetComponentQuat().GetUpVector();
+//    const FVector COM = Mesh->GetCenterOfMass();
+//
+//    UE_LOG(LogTemp, Warning, TEXT("=== FRAME ==="));
+//    UE_LOG(LogTemp, Warning, TEXT("COM=(%.6f %.6f %.6f)"), COM.X, COM.Y, COM.Z);
+//
+//    for (int i = 0; i < Motors.Num(); ++i)
+//    {
+//        const FMotorState& Motor = Motors[i];
+//
+//        const float ForceMagnitudeN = Motor.ThrustOutput * MaxMotorThrust;
+//        const FVector Force = UpVector * (ForceMagnitudeN * 100.f);
+//
+//        const FVector WorldLocation =
+//            Mesh->GetComponentTransform().TransformPosition(Motor.LocalPosition);
+//
+//        Mesh->AddForceAtLocation(Force, WorldLocation);
+//
+//        const FVector ReactiveTorque = UpVector * (ForceMagnitudeN * MotorTorqueCoeff);
+//        Mesh->AddTorqueInRadians(ReactiveTorque * Motor.SpinDirection);
+//
+//        const FVector R = WorldLocation - COM;
+//        const FVector TorqueFromForce = FVector::CrossProduct(R, Force);
+//
+//        UE_LOG(LogTemp, Warning, TEXT("--- Motor %d ---"), i);
+//        UE_LOG(LogTemp, Warning, TEXT("LocalPos=(%.2f %.2f %.2f)"),
+//            Motor.LocalPosition.X, Motor.LocalPosition.Y, Motor.LocalPosition.Z);
+//
+//        UE_LOG(LogTemp, Warning, TEXT("WorldLocation=(%.6f %.6f %.6f)"),
+//            WorldLocation.X, WorldLocation.Y, WorldLocation.Z);
+//
+//        UE_LOG(LogTemp, Warning, TEXT("R=(%.6f %.6f %.6f)"),
+//            R.X, R.Y, R.Z);
+//
+//        UE_LOG(LogTemp, Warning, TEXT("Force=(%.6f %.6f %.6f) | |F|=%.2f"),
+//            Force.X, Force.Y, Force.Z, Force.Size());
+//
+//        UE_LOG(LogTemp, Warning, TEXT("TorqueFromForce=(%.6f %.6f %.6f)"),
+//            TorqueFromForce.X, TorqueFromForce.Y, TorqueFromForce.Z);
+//    }
+//}
+
 void AFPVDronePawn::ApplyMotorForces()
 {
     UStaticMeshComponent* Mesh = GetPlaneMesh();
@@ -168,43 +218,24 @@ void AFPVDronePawn::ApplyMotorForces()
     }
 
     const FVector UpVector = Mesh->GetComponentQuat().GetUpVector();
-    const FVector COM = Mesh->GetCenterOfMass();
 
-    UE_LOG(LogTemp, Warning, TEXT("=== FRAME ==="));
-    UE_LOG(LogTemp, Warning, TEXT("COM=(%.6f %.6f %.6f)"), COM.X, COM.Y, COM.Z);
+    float TotalYawTorque = 0.f;
 
-    for (int i = 0; i < Motors.Num(); ++i)
+    for (const FMotorState& Motor : Motors)
     {
-        const FMotorState& Motor = Motors[i];
-
         const float ForceMagnitudeN = Motor.ThrustOutput * MaxMotorThrust;
         const FVector Force = UpVector * (ForceMagnitudeN * 100.f);
-
-        const FVector WorldLocation =
-            Mesh->GetComponentTransform().TransformPosition(Motor.LocalPosition);
+        const FVector WorldLocation = Mesh->GetComponentTransform().TransformPosition(Motor.LocalPosition);
 
         Mesh->AddForceAtLocation(Force, WorldLocation);
 
-        const FVector ReactiveTorque = UpVector * (ForceMagnitudeN * MotorTorqueCoeff);
-        Mesh->AddTorqueInRadians(ReactiveTorque * Motor.SpinDirection);
-
-        const FVector R = WorldLocation - COM;
-        const FVector TorqueFromForce = FVector::CrossProduct(R, Force);
-
-        UE_LOG(LogTemp, Warning, TEXT("--- Motor %d ---"), i);
-        UE_LOG(LogTemp, Warning, TEXT("LocalPos=(%.2f %.2f %.2f)"),
-            Motor.LocalPosition.X, Motor.LocalPosition.Y, Motor.LocalPosition.Z);
-
-        UE_LOG(LogTemp, Warning, TEXT("WorldLocation=(%.6f %.6f %.6f)"),
-            WorldLocation.X, WorldLocation.Y, WorldLocation.Z);
-
-        UE_LOG(LogTemp, Warning, TEXT("R=(%.6f %.6f %.6f)"),
-            R.X, R.Y, R.Z);
-
-        UE_LOG(LogTemp, Warning, TEXT("Force=(%.6f %.6f %.6f) | |F|=%.2f"),
-            Force.X, Force.Y, Force.Z, Force.Size());
-
-        UE_LOG(LogTemp, Warning, TEXT("TorqueFromForce=(%.6f %.6f %.6f)"),
-            TorqueFromForce.X, TorqueFromForce.Y, TorqueFromForce.Z);
+        TotalYawTorque += ForceMagnitudeN * Motor.SpinDirection;
     }
+
+    YawTorque = TotalYawTorque * 100.f * MotorTorqueCoeff * YawInput;
+
+    const FVector LocalTorque = FVector(0.f, 0.f, YawTorque);
+    const FVector WorldTorque = Mesh->GetComponentTransform().TransformVectorNoScale(LocalTorque);
+
+    Mesh->AddTorqueInRadians(WorldTorque);
 }
