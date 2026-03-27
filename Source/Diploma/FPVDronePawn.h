@@ -79,7 +79,7 @@ private:
 
     // Коефіцієнт реактивного торку мотора (yaw від різниці CW/CCW)
     UPROPERTY(EditAnywhere, Category = "FPV|Motors")
-    float MotorTorqueCoeff = 0.02f;
+    float MotorYawTorquePerNewton;
 
     // Цільові кутові швидкості (deg/s) — задаються стіком
     UPROPERTY(EditAnywhere, Category = "FPV|Rates")
