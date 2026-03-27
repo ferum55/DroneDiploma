@@ -31,6 +31,9 @@ AFPVDronePawn::AFPVDronePawn()
 void AFPVDronePawn::BeginPlay()
 {
     Super::BeginPlay();
+    PitchPID.Reset();
+    RollPID.Reset();
+    YawPID.Reset();
     InitMotors();
     PlaneMesh->SetCenterOfMass(FVector(15.76f, 0.f, -7.05f), NAME_None);
     PlaneMesh->SetMassOverrideInKg(NAME_None, 4.5f, true);
