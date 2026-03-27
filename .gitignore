@@ -1,0 +1,153 @@
+# ===============================
+# Unreal Engine 4 Project .gitignore
+# ===============================
+
+# Build artifacts and binaries
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+Build/
+.vscode/
+.idea/
+.vs/
+*.VC.db
+*.opensdf
+*.sdf
+*.suo
+*.VC.opendb
+
+# User-specific files
+*.user
+*.userprefs
+*.log
+*.tlog
+*.tmp
+*.bak
+*.swp
+*_i.c
+*_p.c
+*.ipch
+*.obj
+*.pch
+*.pdb
+*.idb
+*.dll
+*.exe
+*.lib
+*.app
+*.dylib
+*.so
+
+# Backup / autosave files
+*_Backup*/
+*_autosaves/
+*.autosave
+*.backup
+*.old
+
+# Unreal auto-generated config
+Config/DefaultEditorPerProjectUserSettings.ini
+Config/DefaultEditor.ini
+
+# Temporary cooking/packaging folders
+Saved/
+Script/
+*.target
+*.modules
+*.VC.db
+*.VC.VC.opendb
+*.VC.db-shm
+*.VC.db-wal
+
+# Plugin build outputs
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+Plugins/*/Saved/
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Ignore Unreal Build Tool / Visual Studio junk
+*.opensdf
+*.tlog
+*.obj
+*.idb
+*.pdb
+*.ipch
+*.log
+*.lastbuildstate
+*.db
+*.mdb
+*.opendb
+*.VC.db
+*.VC.opendb
+
+# Ignore compiled shaders
+DerivedDataCache/
+ShaderCache/
+*.ushadercache
+*.ushaderprecache
+*.usf
+
+# Ignore crash dumps
+*.dmp
+
+# Ignore packaged game builds
+WindowsNoEditor/
+LinuxNoEditor/
+Android/
+iOS/
+HTML5/
+MacNoEditor/
+Shipping/
+Development/
+
+# Ignore optional engine directories (if engine is included)
+Engine/Binaries/
+Engine/Intermediate/
+Engine/DerivedDataCache/
+Engine/Saved/
+
+# Ignore Folders from Rider, JetBrains, etc.
+.idea/
+.cache/
+*.iml
+*.ipr
+
+# Ignore Auto-generated project files
+*.xcodeproj
+*.xcworkspace
+*.xcuserstate
+*.xcuserdata/
+*.sln
+*.sln.docstates
+*.suo
+*.ncb
+
+# Ignore crash reports and autosaves
+CrashReportClient/
+Saved/Logs/
+Saved/Autosaves/
+
+Content/**/Level/*_BuiltData.uasset
+Content/**/Level/*_BuiltData.uexp
+
+# Ignore Unreal Engine Lightmass cache (BuiltData)
+*_BuiltData.uasset
+*_BuiltData.uexp
+*BuiltData.uasset
+*BuiltData.uexp
+*_BuiltData*
+*BuiltData*
+
+
+
+# Igonre models
+Content/Models/
+Content/VigilanteContent/
+# ===============================
+# End of .gitignore
+# ===============================
