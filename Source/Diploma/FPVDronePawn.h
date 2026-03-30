@@ -65,6 +65,16 @@ protected:
     virtual void ApplyTorques() override;
 
 private:
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Physics")
+    float DragCoeffHorizontal = 0.0014f;  // лобовий опір (XY в локальних)
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Physics")
+    float DragCoeffVertical = 0.005f;     // дисковий опір (Z в локальних)
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Physics")
+    float AngularDragCoeff = 500.f;
+
     // Мотори: FL, FR, BL, BR
     UPROPERTY(EditAnywhere, Category = "FPV|Motors")
     TArray<FMotorState> Motors;
@@ -104,4 +114,5 @@ private:
     void InitMotors();
     void UpdateMotorThrusts(float DeltaTime);
     void ApplyMotorForces();
+    void ApplyAerodynamicDrag();
 };

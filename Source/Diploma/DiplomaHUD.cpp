@@ -62,8 +62,27 @@ void ADiplomaHUD::DrawHUD()
 		DotSize
 	);
 
-	if (TelemetryWidget)
+	if (TelemetryWidget && Pawn)
 	{
 		TelemetryWidget->ApplyTelemetry(Pawn->GetTelemetry());
+
+		TArray<float> AxisValues;
+
+		// 1. Throttle (גזו 0..1)
+		AxisValues.Add(Pawn->GetTelemetry().Throttle01);
+
+		// 2. Pitch (-1..1 ? 0..1)
+		AxisValues.Add((Pawn->GetPitchInput() + 1.f) * 0.5f);
+
+		// 3. Roll (-1..1 ? 0..1)
+		AxisValues.Add((Pawn->GetRollInput() + 1.f) * 0.5f);
+
+		// 4. Yaw (-1..1 ? 0..1)
+		AxisValues.Add((Pawn->GetYawInput() + 1.f) * 0.5f);
+
+		TelemetryWidget->ApplyAxisValues(AxisValues);
 	}
+	float RawThrottle = Pawn->GetInputAxisValue(TEXT("TestAxis4"));
+	TelemetryWidget->ApplyRawThrottle(RawThrottle);
+	
 }

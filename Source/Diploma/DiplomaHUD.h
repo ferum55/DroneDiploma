@@ -33,4 +33,7 @@ protected:
 
 	UPROPERTY()
 	UDroneTelemetryWidget* TelemetryWidget = nullptr;
+
+	float ThrottleMin = 999.f;
+	float ThrottleMax = -999.f;
 };

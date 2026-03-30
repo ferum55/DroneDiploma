@@ -136,7 +136,8 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "UAV|MouseJoystick")
 	float MouseSmoothing = 5.f;
 
-
+	float NormalizeThrottle(float Raw) const;
+	float NormalizeAxis(float Raw) const;
 
 
 private:
@@ -155,7 +156,4 @@ public:
 	void ToggleMouseJoystick();
 	void CenterMouseCursor();
 	void UpdateTelemetry();
-
-
-
 };

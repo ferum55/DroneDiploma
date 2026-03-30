@@ -123,9 +123,26 @@ void ADiplomaPawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	UpdateMouseJoystick();
-	ApplyThrust();
-	ApplyTorques();
+	//ApplyThrust();
+	//ApplyTorques();
 	UpdateTelemetry();
+	float RawThrottle = GetInputAxisValue(TEXT("TestAxis4"));
+	float RawPitch = GetInputAxisValue(TEXT("TestAxis5"));
+	float RawRoll = GetInputAxisValue(TEXT("TestAxis3"));
+	float RawYaw = GetInputAxisValue(TEXT("TestAxis6"));
+
+	float NormThrottle = NormalizeThrottle(RawThrottle);
+	float NormPitch = NormalizeCenteredAxis(RawPitch, 0.0f);
+	float NormRoll = NormalizeCenteredAxis(RawRoll, 0.0f);
+	float NormYaw = NormalizeCenteredAxis(RawYaw, 0.0f);
+
+	/*UE_LOG(LogTemp, Warning,
+		TEXT("RAW  T=%.3f P=%.3f R=%.3f Y=%.3f | NORM  T=%.3f P=%.3f R=%.3f Y=%.3f"),
+		RawThrottle, RawPitch, RawRoll, RawYaw,
+		NormThrottle, NormPitch, NormRoll, NormYaw
+	);*/
+
+	UE_LOG(LogTemp, Warning, TEXT("RAW=%.3f NORM=%.3f"), RawYaw, NormYaw);
 }
 
 void ADiplomaPawn::NotifyHit(class UPrimitiveComponent* MyComp, class AActor* Other, class UPrimitiveComponent* OtherComp, bool bSelfMoved, FVector HitLocation, FVector HitNormal, FVector NormalImpulse, const FHitResult& Hit)
@@ -154,23 +171,33 @@ void ADiplomaPawn::SetupPlayerInputComponent(class UInputComponent* PlayerInputC
 		this,
 		&ADiplomaPawn::ToggleMouseJoystick
 	);
+
+
+	PlayerInputComponent->BindAxis("TestAxis1");
+	PlayerInputComponent->BindAxis("TestAxis2");
+	PlayerInputComponent->BindAxis("TestAxis3");
+	PlayerInputComponent->BindAxis("TestAxis4");
+	PlayerInputComponent->BindAxis("TestAxis5");
+	PlayerInputComponent->BindAxis("TestAxis6");
+	PlayerInputComponent->BindAxis("TestAxis7");
+	PlayerInputComponent->BindAxis("TestAxis8");
 }
 
 
 
 void ADiplomaPawn::PitchInputAxis(float Value)
 {
-	PitchInput = FMath::Clamp(Value, -1.f, 1.f);
+	PitchInput = NormalizeAxis(Value); //NormalizeCenteredAxis(Value, 0.654f);
 }
 
 void ADiplomaPawn::RollInputAxis(float Value)
 {
-	RollInput = FMath::Clamp(Value, -1.f, 1.f);
+	RollInput = -NormalizeAxis(Value); //NormalizeCenteredAxis(Value, 0.654f);
 }
 
 void ADiplomaPawn::YawInputAxis(float Value)
 {
-	YawInput = FMath::Clamp(Value, -1.f, 1.f);
+	YawInput = NormalizeAxis(Value);//NormalizeCenteredAxis(Value, 0.665f);
 }
 
 
@@ -178,7 +205,7 @@ void ADiplomaPawn::ThrottleInput(float Value)
 {
 	//UE_LOG(LogTemp, Warning, TEXT("Throttle axis value: %.3f"), Value);
 
-	Throttle = FMath::Clamp(Throttle + Value * GetWorld()->GetDeltaSeconds(), 0.f, 1.f);
+	Throttle = NormalizeThrottle(Value);
 	/*UE_LOG(LogTemp, Warning, TEXT("Throttle state: %.3f"), Throttle);*/
 }
 
@@ -300,6 +327,8 @@ void ADiplomaPawn::UpdateTelemetry()
 	Telemetry.PitchDeg = R.Pitch;
 	Telemetry.RollDeg = R.Roll;
 	Telemetry.YawDeg = R.Yaw;
+
+
 }
 
 float ADiplomaPawn::GetRadioAltitudeMeters(bool& bValid) const
@@ -329,3 +358,76 @@ float ADiplomaPawn::GetRadioAltitudeMeters(bool& bValid) const
 	return bHit ? Hit.Distance / 100.f : 0.f;
 }
 
+float ADiplomaPawn::NormalizeThrottle(float Raw) const
+{
+	float Shifted = Raw;
+
+	if (Raw > 0.5f)
+	{
+		Shifted = Raw - 1.0f;
+	}
+
+	float Value = Shifted + 0.5f;
+
+	const float Min = 0.15f;
+	const float Max = 0.85f;
+
+	Value = (Value - Min) / (Max - Min);
+
+	Value = FMath::Clamp(Value, 0.f, 1.f);
+
+	if (Value < 0.02f)
+	{
+		Value = 0.f;
+	}
+
+	return Value;
+}
+
+float ADiplomaPawn::NormalizeCenteredAxis(float Raw, float Center) const
+{
+	// unwrap
+	float Shifted = Raw;
+
+	if (Raw > 0.5f)
+	{
+		Shifted = Raw - 1.0f;
+	}
+
+	// центр теж треба зсунути
+	float ShiftedCenter = Center;
+
+	if (Center > 0.5f)
+	{
+		ShiftedCenter = Center - 1.0f;
+	}
+
+	float Value = Shifted - ShiftedCenter;
+
+	// масштаб (приблизно однаковий для всіх осей)
+	const float MaxAbs = 0.35f;
+
+	Value /= MaxAbs;
+
+	return FMath::Clamp(Value, -1.f, 1.f);
+}
+float ADiplomaPawn::NormalizeAxis(float Raw) const
+{
+	// unwrap (як для throttle)
+	float Shifted = Raw;
+
+	if (Raw > 0.5f)
+	{
+		Shifted = Raw - 1.0f;
+	}
+
+	// тепер діапазон приблизно [-0.35 .. +0.35]
+	float Value = Shifted;
+
+	// нормалізуємо в -1..1
+	const float MaxAbs = 0.35f;
+
+	Value = Value / MaxAbs;
+
+	return FMath::Clamp(Value, -1.f, 1.f);
+}

@@ -51,3 +51,34 @@ void UDroneTelemetryWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 		BarThrottle->SetPercent(InTelemetry.Throttle01);
 	}
 }
+
+void UDroneTelemetryWidget::ApplyAxisValues(const TArray<float>& AxisValues)
+{
+	if (BarPitch && AxisValues.IsValidIndex(1))
+	{
+		BarPitch->SetPercent(FMath::Clamp(AxisValues[1], 0.f, 1.f));
+	}
+
+	// 2 - Roll
+	if (BarRoll && AxisValues.IsValidIndex(2))
+	{
+		BarRoll->SetPercent(FMath::Clamp(AxisValues[2], 0.f, 1.f));
+	}
+
+	// 3 - Yaw
+	if (BarYaw && AxisValues.IsValidIndex(3))
+	{
+		BarYaw->SetPercent(FMath::Clamp(AxisValues[3], 0.f, 1.f));
+	}
+}
+
+//temp
+void UDroneTelemetryWidget::ApplyRawThrottle(float RawThrottle)
+{
+	if (TextThrottleRaw)
+	{
+		TextThrottleRaw->SetText(FText::FromString(
+			FString::Printf(TEXT("Throttle(Raw): %.3f"), RawThrottle)
+		));
+	}
+}
