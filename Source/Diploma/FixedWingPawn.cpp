@@ -1,5 +1,6 @@
 #include "FixedWingPawn.h"
 #include "Components/StaticMeshComponent.h"
+#include "DrawDebugHelpers.h"
 
 AFixedWingPawn::AFixedWingPawn()
 {
@@ -17,6 +18,17 @@ void AFixedWingPawn::BeginPlay()
 
 	PlaneMesh->SetMassOverrideInKg(NAME_None, AircraftMassKg);
 	PlaneMesh->SetCenterOfMass(CenterOfMassOffsetCm, NAME_None);
+	//temp
+	PlaneMesh->SetPhysicsLinearVelocity(GetActorForwardVector() * 3500.f);
+	UE_LOG(LogTemp, Warning, TEXT("ForwardVector=%s"), *PlaneMesh->GetForwardVector().ToString());
+	UE_LOG(LogTemp, Warning, TEXT("RightVector=%s"), *PlaneMesh->GetRightVector().ToString());
+	UE_LOG(LogTemp, Warning, TEXT("UpVector=%s"), *PlaneMesh->GetUpVector().ToString());
+
+	bDropTestStarted = false;
+	bDropTestLogged = false;
+	DropTestStartTime = 0.f;
+	DropTestStartAltitudeM = 0.f;
+
 }
 
 void AFixedWingPawn::Tick(float DeltaSeconds)
@@ -30,6 +42,69 @@ void AFixedWingPawn::Tick(float DeltaSeconds)
 
 	SimulateFixedWing(DeltaSeconds);
 	UpdateTelemetry();
+	
+	//logs
+	const FTransform MeshTransform = PlaneMesh->GetComponentTransform();
+	const FVector WorldVelocityCm = PlaneMesh->GetPhysicsLinearVelocity();
+	const FVector LocalVelocityMps = MeshTransform.InverseTransformVectorNoScale(WorldVelocityCm) / 100.f;
+	const float ForwardSpeed = LocalVelocityMps.X;
+	const float WorldVerticalMps = WorldVelocityCm.Z / 100.f;
+	const float AoADeg = FMath::RadiansToDegrees(FMath::Atan2(-LocalVelocityMps.Z, FMath::Max(ForwardSpeed, 0.1f)));
+	const FRotator R = GetActorRotation();
+	const float AltitudeM = GetActorLocation().Z / 100.f;
+	const float TimeSec = GetWorld()->GetTimeSeconds();
+	const float InPitch = GetPitchInput();
+	const float ElevatorDeltaDeg = InPitch * ElevatorAoADeltaDeg;
+
+
+
+	UE_LOG(LogTemp, Warning, TEXT("T=%.2f InRoll=%.2f Roll=%.2f Pitch=%.2f Yaw=%.2f Forward=%.2f WorldVertical=%.2f AoA=%.2f"),
+		GetWorld()->GetTimeSeconds(),
+		GetRollInput(),
+		R.Roll,
+		R.Pitch,
+		R.Yaw,
+		ForwardSpeed,
+		WorldVerticalMps,
+		AoADeg);
+	const FVector Origin = PlaneMesh->GetComponentLocation();
+	const FVector Forward = PlaneMesh->GetForwardVector();
+	const FVector Up = PlaneMesh->GetUpVector();
+	const FVector Right = PlaneMesh->GetRightVector();
+
+	DrawDebugLine(GetWorld(), Origin, Origin + Forward * 300.f, FColor::Red, false, 0.f, 0, 2.f);
+	DrawDebugLine(GetWorld(), Origin, Origin + Right * 300.f, FColor::Green, false, 0.f, 0, 2.f);
+	DrawDebugLine(GetWorld(), Origin, Origin + Up * 300.f, FColor::Blue, false, 0.f, 0, 2.f);
+
+
+	if (PlaneMesh && GetWorld())
+	{
+		const float Altitude = GetActorLocation().Z / 100.f;
+
+		if (!bDropTestStarted)
+		{
+			bDropTestStarted = true;
+			DropTestStartTime = GetWorld()->GetTimeSeconds();
+			DropTestStartAltitudeM = Altitude;
+
+			UE_LOG(LogTemp, Warning, TEXT("DROP TEST START: Time=%.2f Alt=%.2f"),
+				DropTestStartTime,
+				DropTestStartAltitudeM);
+		}
+
+		if (!bDropTestLogged && Altitude <= DropTestStartAltitudeM - 10.f)
+		{
+			bDropTestLogged = true;
+
+			const float Elapsed = GetWorld()->GetTimeSeconds() - DropTestStartTime;
+
+			UE_LOG(LogTemp, Warning, TEXT("DROP TEST 10M: Elapsed=%.2f sec StartAlt=%.2f CurrentAlt=%.2f"),
+				Elapsed,
+				DropTestStartAltitudeM,
+				Altitude);
+		}
+	}
+
 }
 
 void AFixedWingPawn::SimulateFixedWing(float DeltaSeconds)
@@ -53,7 +128,7 @@ void AFixedWingPawn::SimulateFixedWing(float DeltaSeconds)
 	ApplyWingHalf(true, LeftWingLocalPos, AirDensity, LocalVelocityMps, LocalAngularRatesRad);
 	ApplyWingHalf(false, RightWingLocalPos, AirDensity, LocalVelocityMps, LocalAngularRatesRad);
 	ApplyHorizontalTail(AirDensity, LocalVelocityMps, LocalAngularRatesRad);
-	ApplyVerticalTail(AirDensity, LocalVelocityMps, LocalAngularRatesRad);
+	/*ApplyVerticalTail(AirDensity, LocalVelocityMps, LocalAngularRatesRad);*/
 	ApplyParasiteDrag(AirDensity);
 }
 

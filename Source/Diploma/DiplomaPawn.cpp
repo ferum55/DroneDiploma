@@ -248,7 +248,7 @@ void ADiplomaPawn::PitchInputAxis(float Value)
 
 void ADiplomaPawn::RollInputAxis(float Value)
 {
-	RollInput =-NormalizeCenteredAxis(Value); //NormalizeCenteredAxis(Value, 0.654f);
+	RollInput =NormalizeCenteredAxis(Value); //NormalizeCenteredAxis(Value, 0.654f);
 }
 
 void ADiplomaPawn::YawInputAxis(float Value)

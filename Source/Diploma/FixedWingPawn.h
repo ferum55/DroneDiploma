@@ -40,28 +40,28 @@ protected:
 	float AircraftMassKg = 8.0f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Mass")
-	FVector CenterOfMassOffsetCm = FVector(12.f, 0.f, 0.f);
+	FVector CenterOfMassOffsetCm = FVector(0.f, 0.f, 0.f);
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Propulsion")
-	float MaxEngineThrustN = 65.f;
+	float MaxEngineThrustN = 20.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Wing")
-	float WingAreaM2 = 0.85f;
+	float WingAreaM2 = 0.65f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Wing")
 	float WingSpanM = 2.2f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Wing")
-	float WingIncidenceDeg = 1.5f;
+	float WingIncidenceDeg = 1.0f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Wing")
 	float WingZeroLiftAoADeg = -2.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Wing")
-	float WingLiftSlopePerRad = 5.5f;
+	float WingLiftSlopePerRad = 4.5f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Wing")
-	float WingCLMax = 1.35f;
+	float WingCLMax = 1.2f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Wing")
 	float WingStallAoADeg = 14.f;
@@ -82,16 +82,16 @@ protected:
 	float AileronLiftDelta = 0.28f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Wing")
-	FVector LeftWingLocalPos = FVector(10.f, -110.f, 0.f);
+	FVector LeftWingLocalPos = FVector(0.f, -110.f, 0.f);
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Wing")
-	FVector RightWingLocalPos = FVector(10.f, 110.f, 0.f);
+	FVector RightWingLocalPos = FVector(0.f, 110.f, 0.f);
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Tail")
-	float HorizontalTailAreaM2 = 0.18f;
+	float HorizontalTailAreaM2 = 0.09f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Tail")
-	float HorizontalTailIncidenceDeg = -1.5f;
+	float HorizontalTailIncidenceDeg = 0.5f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Tail")
 	float HorizontalTailZeroLiftAoADeg = 0.f;
@@ -118,10 +118,10 @@ protected:
 	float HorizontalTailStallDragAdd = 0.25f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Tail")
-	float ElevatorAoADeltaDeg = 12.f;
+	float ElevatorAoADeltaDeg = 6.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Tail")
-	FVector HorizontalTailLocalPos = FVector(-95.f, 0.f, 8.f);
+	FVector HorizontalTailLocalPos = FVector(-95.f, 0.f, 0.f);
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Fin")
 	float VerticalTailAreaM2 = 0.12f;
@@ -154,8 +154,14 @@ protected:
 	FVector VerticalTailLocalPos = FVector(-100.f, 0.f, 25.f);
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Body")
-	float FuselageEquivalentAreaM2 = 0.10f;
+	float FuselageEquivalentAreaM2 = 0.08f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Body")
-	float FuselageCD0 = 0.10f;
+	float FuselageCD0 = 0.08f;
+
+	//temp
+	bool bDropTestStarted = false;
+	bool bDropTestLogged = false;
+	float DropTestStartTime = 0.f;
+	float DropTestStartAltitudeM = 0.f;
 };
