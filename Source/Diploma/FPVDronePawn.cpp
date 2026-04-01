@@ -74,10 +74,6 @@ void AFPVDronePawn::ApplyThrust()
     ApplyAerodynamicDrag();
 }
 
-void AFPVDronePawn::ApplyTorques()
-{
-    /*Super::ApplyTorques();*/
-}
 
 void AFPVDronePawn::InitMotors()
 {

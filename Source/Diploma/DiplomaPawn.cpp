@@ -34,7 +34,7 @@ ADiplomaPawn::ADiplomaPawn()
 	PlaneMesh->SetStaticMesh(ConstructorStatics.PlaneMesh.Get());	// Set static mesh
 	RootComponent = PlaneMesh;
 
-	PlaneMesh->SetNotifyRigidBodyCollision(true);
+	//PlaneMesh->SetNotifyRigidBodyCollision(true);
 	PlaneMesh->SetSimulatePhysics(true);
 	PlaneMesh->SetEnableGravity(true);
 	//PlaneMesh->SetLinearDamping(0.05f);
@@ -192,22 +192,22 @@ void ADiplomaPawn::NotifyHit(class UPrimitiveComponent* MyComp, class AActor* Ot
 void ADiplomaPawn::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
-	if (bCrashed) return;
+	//if (bCrashed) return;
 
-	bCrashed = true;
-	CrashTimer = CrashRespawnDelay;
+	//bCrashed = true;
+	//CrashTimer = CrashRespawnDelay;
 
-	UE_LOG(LogTemp, Warning, TEXT("CRASH! Hit: %s | Impulse: %.1f"),
-		OtherActor ? *OtherActor->GetName() : TEXT("Unknown"),
-		NormalImpulse.Size());
+	//UE_LOG(LogTemp, Warning, TEXT("CRASH! Hit: %s | Impulse: %.1f"),
+	//	OtherActor ? *OtherActor->GetName() : TEXT("Unknown"),
+	//	NormalImpulse.Size());
 
-	PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
-	PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
-	SetActorLocation(SpawnLocation);
-	SetActorRotation(SpawnRotation);
+	//PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	//PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+	//SetActorLocation(SpawnLocation);
+	//SetActorRotation(SpawnRotation);
 
-	// ¬имикаЇмо ф≥зику на час таймера
-	PlaneMesh->SetSimulatePhysics(false);
+	//// ¬имикаЇмо ф≥зику на час таймера
+	//PlaneMesh->SetSimulatePhysics(false);
 }
 
 
@@ -248,7 +248,7 @@ void ADiplomaPawn::PitchInputAxis(float Value)
 
 void ADiplomaPawn::RollInputAxis(float Value)
 {
-	RollInput = -NormalizeCenteredAxis(Value); //NormalizeCenteredAxis(Value, 0.654f);
+	RollInput =-NormalizeCenteredAxis(Value); //NormalizeCenteredAxis(Value, 0.654f);
 }
 
 void ADiplomaPawn::YawInputAxis(float Value)

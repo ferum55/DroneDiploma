@@ -62,7 +62,7 @@ public:
 
 protected:
     virtual void ApplyThrust() override;
-    virtual void ApplyTorques() override;
+    //virtual void ApplyTorques() override;
 
 private:
 
