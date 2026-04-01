@@ -137,13 +137,24 @@ protected:
 	float MouseSmoothing = 5.f;
 
 	float NormalizeThrottle(float Raw) const;
-	float NormalizeAxis(float Raw) const;
+	float NormalizeCenteredAxis(float Raw) const;
+
+	//Reset After Crash
+	bool bCrashed = false;
+	float CrashTimer = 0.f;
+	float CrashRespawnDelay = 2.f;
+	FVector SpawnLocation;
+	FRotator SpawnRotation;
+	UFUNCTION()
+	void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor,
+		UPrimitiveComponent* OtherComp, FVector NormalImpulse,
+		const FHitResult& Hit);
+
 
 
 private:
 
 	float GetRadioAltitudeMeters(bool& bValid) const;
-
 
 
 public:

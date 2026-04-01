@@ -42,9 +42,6 @@ void AFPVDronePawn::BeginPlay()
     // ѕерев≥р€Їмо що спрацювало Ч маЇ бути в локальних координатах в≥дносно меша
     FVector CoM = PlaneMesh->GetBodyInstance()->GetCOMPosition();
     UE_LOG(LogTemp, Warning, TEXT("BodyInstance CoM world: %s"), *CoM.ToString());
-    //PlaneMesh->SetLinearDamping(0.5f);   // зам≥сть л≥н≥йного drag вручну
-/*    PlaneMesh->SetAngularDamping(5.f);  */ // зам≥сть angular drag вручну
-
     //PlaneMesh->BodyInstance.InertiaTensorScale = FVector(0.1f, 0.1f, 0.05f);
 
     for (int i = 0; i < Motors.Num(); i++)
@@ -157,14 +154,17 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
     /*UE_LOG(LogTemp, Warning, TEXT("FL=%.3f FR=%.3f BL=%.3f BR=%.3f"),
         Motors[0].ThrustOutput, Motors[1].ThrustOutput,
         Motors[2].ThrustOutput, Motors[3].ThrustOutput);
-    UE_LOG(LogTemp, Warning, TEXT("PitchCmd=%.3f RollCmd=%.3f YawCmd=%.3f"),
-        PitchCmd, RollCmd, YawCmd);
+    
     UE_LOG(LogTemp, Warning, TEXT("AngVel Local: X=%.2f Y=%.2f Z=%.2f"),
         LocalAngVel.X, LocalAngVel.Y, LocalAngVel.Z);
     UE_LOG(LogTemp, Warning, TEXT("INPUT Pitch=%.2f Roll=%.2f Yaw=%.2f Throttle=%.2f"),
         GetPitchInput(), GetRollInput(), YawInput, Throttle);*/
     /*UE_LOG(LogTemp, Warning, TEXT("TargetYaw=%.2f CurrentYaw=%.2f YawCmd=%.3f"),
         TargetYawRate, CurrentYawRate, YawCmd);*/
+
+    /*UE_LOG(LogTemp, Warning,
+        TEXT("AngVel=%.2f | Target=%.2f | PitchCmd=%.4f | PitchInput=%.3f"),
+        CurrentPitchRate, TargetPitchRate, PitchCmd, GetPitchInput());*/
 
 }
 

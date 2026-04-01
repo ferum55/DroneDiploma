@@ -34,11 +34,11 @@ ADiplomaPawn::ADiplomaPawn()
 	PlaneMesh->SetStaticMesh(ConstructorStatics.PlaneMesh.Get());	// Set static mesh
 	RootComponent = PlaneMesh;
 
-
+	PlaneMesh->SetNotifyRigidBodyCollision(true);
 	PlaneMesh->SetSimulatePhysics(true);
 	PlaneMesh->SetEnableGravity(true);
-	PlaneMesh->SetLinearDamping(0.05f);
-	PlaneMesh->SetAngularDamping(0.1f);
+	//PlaneMesh->SetLinearDamping(0.05f);
+	//PlaneMesh->SetAngularDamping(0.1f);
 	PlaneMesh->SetMassOverrideInKg(NAME_None, 4.5f);
 
 	PlaneMesh->SetCollisionProfileName(TEXT("PhysicsActor"));
@@ -68,6 +68,8 @@ ADiplomaPawn::ADiplomaPawn()
 	RollTorque = 1500.f;
 	YawTorque = 800.f;
 
+	CrashTimer = 3.f;
+
 
 }
 
@@ -76,6 +78,10 @@ void ADiplomaPawn::BeginPlay()
 	Super::BeginPlay();
 	BaroZeroZ = GetActorLocation().Z;
 	PlaneMesh->SetCenterOfMass(FVector::ZeroVector, NAME_None);
+
+	SpawnLocation = GetActorLocation();
+	SpawnRotation = GetActorRotation();
+	PlaneMesh->OnComponentHit.AddDynamic(this, &ADiplomaPawn::OnHit);
 
 	UE_LOG(LogTemp, Warning, TEXT("Actor: %s"), *GetName());
 	UE_LOG(LogTemp, Warning, TEXT("PlaneMesh Rel: %s  World: %s"),
@@ -122,9 +128,18 @@ void ADiplomaPawn::BeginPlay()
 void ADiplomaPawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (bCrashed)
+	{
+		CrashTimer -= DeltaSeconds;
+		if (CrashTimer <= 0.f)
+		{
+			bCrashed = false;
+			PlaneMesh->SetSimulatePhysics(true);
+			UE_LOG(LogTemp, Warning, TEXT("Respawned! Control restored."));
+		}
+		return;
+	}
 	UpdateMouseJoystick();
-	//ApplyThrust();
-	//ApplyTorques();
 	UpdateTelemetry();
 	float RawThrottle = GetInputAxisValue(TEXT("TestAxis4"));
 	float RawPitch = GetInputAxisValue(TEXT("TestAxis5"));
@@ -132,9 +147,9 @@ void ADiplomaPawn::Tick(float DeltaSeconds)
 	float RawYaw = GetInputAxisValue(TEXT("TestAxis6"));
 
 	float NormThrottle = NormalizeThrottle(RawThrottle);
-	float NormPitch = NormalizeCenteredAxis(RawPitch, 0.0f);
-	float NormRoll = NormalizeCenteredAxis(RawRoll, 0.0f);
-	float NormYaw = NormalizeCenteredAxis(RawYaw, 0.0f);
+	float NormPitch = NormalizeCenteredAxis(RawPitch);
+	float NormRoll = NormalizeCenteredAxis(RawRoll);
+	float NormYaw = NormalizeCenteredAxis(RawYaw);
 
 	/*UE_LOG(LogTemp, Warning,
 		TEXT("RAW  T=%.3f P=%.3f R=%.3f Y=%.3f | NORM  T=%.3f P=%.3f R=%.3f Y=%.3f"),
@@ -142,16 +157,57 @@ void ADiplomaPawn::Tick(float DeltaSeconds)
 		NormThrottle, NormPitch, NormRoll, NormYaw
 	);*/
 
-	UE_LOG(LogTemp, Warning, TEXT("RAW=%.3f NORM=%.3f"), RawYaw, NormYaw);
+	//UE_LOG(LogTemp, Warning, TEXT("RAW=%.3f NORM=%.3f"), RawYaw, NormYaw);
 }
 
 void ADiplomaPawn::NotifyHit(class UPrimitiveComponent* MyComp, class AActor* Other, class UPrimitiveComponent* OtherComp, bool bSelfMoved, FVector HitLocation, FVector HitNormal, FVector NormalImpulse, const FHitResult& Hit)
 {
+	UE_LOG(LogTemp, Warning, TEXT("CRASH! Hit actor: %s at location: %s"),
+		Other ? *Other->GetName() : TEXT("Unknown"),
+		*HitLocation.ToString());
 	Super::NotifyHit(MyComp, Other, OtherComp, bSelfMoved, HitLocation, HitNormal, NormalImpulse, Hit);
 
-	// Deflect along the surface when we collide.
+
 	FRotator CurrentRotation = GetActorRotation();
 	SetActorRotation(FQuat::Slerp(CurrentRotation.Quaternion(), HitNormal.ToOrientationQuat(), 0.025f));
+
+	if (bCrashed) return; 
+
+	bCrashed = true;
+	CrashTimer = CrashRespawnDelay;
+
+	UE_LOG(LogTemp, Warning, TEXT("CRASH! Hit actor: %s at location: %s"),
+		Other ? *Other->GetName() : TEXT("Unknown"),
+		*HitLocation.ToString());
+
+	// Зупиняємо фізику
+	PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+
+	// Телепортуємо
+	SetActorLocation(SpawnLocation);
+	SetActorRotation(SpawnRotation);
+}
+
+void ADiplomaPawn::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor,
+	UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
+{
+	if (bCrashed) return;
+
+	bCrashed = true;
+	CrashTimer = CrashRespawnDelay;
+
+	UE_LOG(LogTemp, Warning, TEXT("CRASH! Hit: %s | Impulse: %.1f"),
+		OtherActor ? *OtherActor->GetName() : TEXT("Unknown"),
+		NormalImpulse.Size());
+
+	PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+	SetActorLocation(SpawnLocation);
+	SetActorRotation(SpawnRotation);
+
+	// Вимикаємо фізику на час таймера
+	PlaneMesh->SetSimulatePhysics(false);
 }
 
 
@@ -187,17 +243,17 @@ void ADiplomaPawn::SetupPlayerInputComponent(class UInputComponent* PlayerInputC
 
 void ADiplomaPawn::PitchInputAxis(float Value)
 {
-	PitchInput = NormalizeAxis(Value); //NormalizeCenteredAxis(Value, 0.654f);
+	PitchInput = NormalizeCenteredAxis(Value); //NormalizeCenteredAxis(Value, 0.654f);
 }
 
 void ADiplomaPawn::RollInputAxis(float Value)
 {
-	RollInput = -NormalizeAxis(Value); //NormalizeCenteredAxis(Value, 0.654f);
+	RollInput = -NormalizeCenteredAxis(Value); //NormalizeCenteredAxis(Value, 0.654f);
 }
 
 void ADiplomaPawn::YawInputAxis(float Value)
 {
-	YawInput = NormalizeAxis(Value);//NormalizeCenteredAxis(Value, 0.665f);
+	YawInput = NormalizeCenteredAxis(Value);//NormalizeCenteredAxis(Value, 0.665f);
 }
 
 
@@ -384,34 +440,7 @@ float ADiplomaPawn::NormalizeThrottle(float Raw) const
 	return Value;
 }
 
-float ADiplomaPawn::NormalizeCenteredAxis(float Raw, float Center) const
-{
-	// unwrap
-	float Shifted = Raw;
-
-	if (Raw > 0.5f)
-	{
-		Shifted = Raw - 1.0f;
-	}
-
-	// центр теж треба зсунути
-	float ShiftedCenter = Center;
-
-	if (Center > 0.5f)
-	{
-		ShiftedCenter = Center - 1.0f;
-	}
-
-	float Value = Shifted - ShiftedCenter;
-
-	// масштаб (приблизно однаковий для всіх осей)
-	const float MaxAbs = 0.35f;
-
-	Value /= MaxAbs;
-
-	return FMath::Clamp(Value, -1.f, 1.f);
-}
-float ADiplomaPawn::NormalizeAxis(float Raw) const
+float ADiplomaPawn::NormalizeCenteredAxis(float Raw) const
 {
 	// unwrap (як для throttle)
 	float Shifted = Raw;
