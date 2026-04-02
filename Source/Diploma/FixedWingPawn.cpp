@@ -44,29 +44,56 @@ void AFixedWingPawn::Tick(float DeltaSeconds)
 	UpdateTelemetry();
 	
 	//logs
+
 	const FTransform MeshTransform = PlaneMesh->GetComponentTransform();
 	const FVector WorldVelocityCm = PlaneMesh->GetPhysicsLinearVelocity();
 	const FVector LocalVelocityMps = MeshTransform.InverseTransformVectorNoScale(WorldVelocityCm) / 100.f;
+
+	const FVector WorldAngularRatesRad = PlaneMesh->GetPhysicsAngularVelocityInRadians();
+	const FVector LocalAngularRatesRad = MeshTransform.InverseTransformVectorNoScale(WorldAngularRatesRad);
+
 	const float ForwardSpeed = LocalVelocityMps.X;
 	const float WorldVerticalMps = WorldVelocityCm.Z / 100.f;
-	const float AoADeg = FMath::RadiansToDegrees(FMath::Atan2(-LocalVelocityMps.Z, FMath::Max(ForwardSpeed, 0.1f)));
-	const FRotator R = GetActorRotation();
+	const float AoADeg = FMath::RadiansToDegrees(FMath::Atan2(-LocalVelocityMps.Z, FMath::Max(FMath::Abs(ForwardSpeed), 0.1f)));
+	const float BetaDeg = FMath::RadiansToDegrees(FMath::Atan2(LocalVelocityMps.Y, FMath::Max(FMath::Abs(ForwardSpeed), 0.1f)));
+
+	const FRotator R = PlaneMesh->GetComponentRotation();
 	const float AltitudeM = GetActorLocation().Z / 100.f;
 	const float TimeSec = GetWorld()->GetTimeSeconds();
+
 	const float InPitch = GetPitchInput();
+	const float InRoll = GetRollInput();
+	const float InYaw = GetYawInput();
+
 	const float ElevatorDeltaDeg = InPitch * ElevatorAoADeltaDeg;
 
+	const float RollRateDeg = FMath::RadiansToDegrees(LocalAngularRatesRad.X);
+	const float PitchRateDeg = FMath::RadiansToDegrees(LocalAngularRatesRad.Y);
+	const float YawRateDeg = FMath::RadiansToDegrees(LocalAngularRatesRad.Z);
 
-
-	UE_LOG(LogTemp, Warning, TEXT("T=%.2f InRoll=%.2f Roll=%.2f Pitch=%.2f Yaw=%.2f Forward=%.2f WorldVertical=%.2f AoA=%.2f"),
-		GetWorld()->GetTimeSeconds(),
-		GetRollInput(),
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT("T=%.2f InRoll=%.2f InPitch=%.2f InYaw=%.2f Roll=%.2f Pitch=%.2f Yaw=%.2f P=%.2f Q=%.2f R=%.2f Forward=%.2f Vy=%.2f Vz=%.2f WorldVertical=%.2f AoA=%.2f Beta=%.2f Alt=%.2f"),
+		TimeSec,
+		InRoll,
+		InPitch,
+		InYaw,
 		R.Roll,
 		R.Pitch,
 		R.Yaw,
-		ForwardSpeed,
+		RollRateDeg,
+		PitchRateDeg,
+		YawRateDeg,
+		LocalVelocityMps.X,
+		LocalVelocityMps.Y,
+		LocalVelocityMps.Z,
 		WorldVerticalMps,
-		AoADeg);
+		AoADeg,
+		BetaDeg,
+		AltitudeM
+	);
+
 	const FVector Origin = PlaneMesh->GetComponentLocation();
 	const FVector Forward = PlaneMesh->GetForwardVector();
 	const FVector Up = PlaneMesh->GetUpVector();
@@ -114,6 +141,8 @@ void AFixedWingPawn::SimulateFixedWing(float DeltaSeconds)
 		return;
 	}
 
+
+
 	const FTransform MeshTransform = PlaneMesh->GetComponentTransform();
 	const FVector WorldVelocityCm = PlaneMesh->GetPhysicsLinearVelocity();
 	const FVector LocalVelocityMps = MeshTransform.InverseTransformVectorNoScale(WorldVelocityCm) / 100.f;
@@ -124,11 +153,20 @@ void AFixedWingPawn::SimulateFixedWing(float DeltaSeconds)
 	const float AltitudeM = GetActorLocation().Z / 100.f;
 	const float AirDensity = GetAirDensity(AltitudeM);
 
+	//roll damping
+	const float qBody = GetDynamicPressure(AirDensity, LocalVelocityMps);
+	const float RollRateRad = LocalAngularRatesRad.X;
+	const float RollDampingTorqueNm = -RollRateRad * RollDampingCoeff * qBody * WingAreaM2 * WingSpanM;
+	const FVector LocalTorqueCm(RollDampingTorqueNm * 100.f, 0.f, 0.f);
+	const FVector WorldTorque = PlaneMesh->GetComponentTransform().TransformVectorNoScale(LocalTorqueCm);
+	PlaneMesh->AddTorqueInRadians(WorldTorque);
+	//
+
 	ApplyPropulsion(AirDensity);
 	ApplyWingHalf(true, LeftWingLocalPos, AirDensity, LocalVelocityMps, LocalAngularRatesRad);
 	ApplyWingHalf(false, RightWingLocalPos, AirDensity, LocalVelocityMps, LocalAngularRatesRad);
 	ApplyHorizontalTail(AirDensity, LocalVelocityMps, LocalAngularRatesRad);
-	/*ApplyVerticalTail(AirDensity, LocalVelocityMps, LocalAngularRatesRad);*/
+	ApplyVerticalTail(AirDensity, LocalVelocityMps, LocalAngularRatesRad);
 	ApplyParasiteDrag(AirDensity);
 }
 
@@ -164,10 +202,26 @@ void AFixedWingPawn::ApplyWingHalf(bool bLeftWing, const FVector& LocalPositionC
 	}
 
 	const float q = GetDynamicPressure(AirDensity, SectionVelocityMps);
-	const float ForwardSpeedMps = FMath::Max(SectionVelocityMps.X, 0.1f);
+	const float ForwardSpeedMps = FMath::Max(FMath::Abs(LocalVelocityMps.X), 0.1f);
 
-	float AoADeg = FMath::RadiansToDegrees(FMath::Atan2(-SectionVelocityMps.Z, ForwardSpeedMps));
+	float AoADeg = FMath::RadiansToDegrees(FMath::Atan2(-SectionVelocityMps.Z, FMath::Max(SectionVelocityMps.X, 0.1f)));
 	AoADeg += WingIncidenceDeg;
+
+	const float BetaDeg = FMath::RadiansToDegrees(FMath::Atan2(LocalVelocityMps.Y, ForwardSpeedMps));
+
+	const float BankDeg = FMath::Abs(FMath::UnwindDegrees(PlaneMesh->GetComponentRotation().Roll));
+	const float InputAbs = FMath::Abs(RollInput);
+
+	const float InputFade = 1.f - FMath::Clamp(InputAbs / 0.3f, 0.f, 1.f);
+	const float BankFade = FMath::GetMappedRangeValueClamped(
+		FVector2D(0.f, 80.f),
+		FVector2D(1.f, 0.25f),
+		BankDeg
+	);
+
+	const float EffectiveDihedral = DihedralEffectCoeff * InputFade * BankFade;
+	const float DihedralAoADeg = BetaDeg * EffectiveDihedral;
+	AoADeg += bLeftWing ? -DihedralAoADeg : DihedralAoADeg;
 
 	const float StallFactor = GetStallFactor(AoADeg, WingStallAoADeg, WingMaxAoADeg);
 
@@ -183,13 +237,12 @@ void AFixedWingPawn::ApplyWingHalf(bool bLeftWing, const FVector& LocalPositionC
 	const float LiftN = q * HalfWingAreaM2 * CL;
 	const float DragN = q * HalfWingAreaM2 * CD;
 
-	const FVector LocalForceCm = FVector(-DragN * 100.f, 0.f, LiftN * 100.f);
+	const FVector LocalForceCm(-DragN * 100.f, 0.f, LiftN * 100.f);
 	const FVector WorldForceCm = PlaneMesh->GetComponentTransform().TransformVectorNoScale(LocalForceCm);
 	const FVector WorldPos = PlaneMesh->GetComponentTransform().TransformPosition(LocalPositionCm);
 
 	PlaneMesh->AddForceAtLocation(WorldForceCm, WorldPos);
 }
-
 void AFixedWingPawn::ApplyHorizontalTail(float AirDensity, const FVector& LocalVelocityMps, const FVector& LocalAngularRatesRad)
 {
 	if (!PlaneMesh)

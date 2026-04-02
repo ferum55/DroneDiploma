@@ -43,7 +43,7 @@ protected:
 	FVector CenterOfMassOffsetCm = FVector(0.f, 0.f, 0.f);
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Propulsion")
-	float MaxEngineThrustN = 20.f;
+	float MaxEngineThrustN = 25.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Wing")
 	float WingAreaM2 = 0.65f;
@@ -79,7 +79,18 @@ protected:
 	float WingStallDragAdd = 0.65f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Wing")
-	float AileronLiftDelta = 0.28f;
+	float AileronLiftDelta = 0.35f;
+
+	// temp for roll recovery
+	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Wing")
+	float WingDihedralDeg = 2.f; // кут поперечного V крила
+
+	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Wing")
+	float DihedralEffectCoeff = 0.1f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Wing")
+	float RollDampingCoeff = 0.6f;
+	//
 
 	UPROPERTY(EditAnywhere, Category = "UAV|FixedWing|Wing")
 	FVector LeftWingLocalPos = FVector(0.f, -110.f, 0.f);
