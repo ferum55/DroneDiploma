@@ -135,7 +135,7 @@ void ADiplomaPawn::Tick(float DeltaSeconds)
 		{
 			bCrashed = false;
 			PlaneMesh->SetSimulatePhysics(true);
-			UE_LOG(LogTemp, Warning, TEXT("Respawned! Control restored."));
+			/*UE_LOG(LogTemp, Warning, TEXT("Respawned! Control restored."));*/
 		}
 		return;
 	}
@@ -442,7 +442,6 @@ float ADiplomaPawn::NormalizeThrottle(float Raw) const
 
 float ADiplomaPawn::NormalizeCenteredAxis(float Raw) const
 {
-	// unwrap (як для throttle)
 	float Shifted = Raw;
 
 	if (Raw > 0.5f)
@@ -450,13 +449,18 @@ float ADiplomaPawn::NormalizeCenteredAxis(float Raw) const
 		Shifted = Raw - 1.0f;
 	}
 
-	// тепер діапазон приблизно [-0.35 .. +0.35]
 	float Value = Shifted;
 
-	// нормалізуємо в -1..1
 	const float MaxAbs = 0.35f;
-
 	Value = Value / MaxAbs;
+	Value = FMath::Clamp(Value, -1.f, 1.f);
 
-	return FMath::Clamp(Value, -1.f, 1.f);
+	const float DeadZone = 0.02f;
+
+	if (FMath::Abs(Value) < DeadZone)
+	{
+		Value = 0.f;
+	}
+
+	return Value;
 }
