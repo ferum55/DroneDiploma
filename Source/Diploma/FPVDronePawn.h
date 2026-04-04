@@ -20,9 +20,10 @@ struct FPIDController
 
     float Update(float Target, float Current, float DeltaTime)
     {
+        const float SafeDeltaTime = FMath::Max(DeltaTime, KINDA_SMALL_NUMBER);
         const float Error = Target - Current;
-        Integral = FMath::Clamp(Integral + Error * DeltaTime, -IntegralClamp, IntegralClamp);
-        const float Derivative = (Error - PrevError) / DeltaTime;
+        Integral = FMath::Clamp(Integral + Error * SafeDeltaTime, -IntegralClamp, IntegralClamp);
+        const float Derivative = (Error - PrevError) / SafeDeltaTime;
         PrevError = Error;
         return P * Error + I * Integral + D * Derivative;
     }
@@ -49,6 +50,34 @@ struct FMotorState
     float ThrustOutput = 0.f;
 };
 
+USTRUCT()
+struct FFPVDebugState
+{
+    GENERATED_BODY()
+
+    float CurrentPitchRate = 0.f;
+    float CurrentRollRate = 0.f;
+    float CurrentYawRate = 0.f;
+
+    float TargetPitchRate = 0.f;
+    float TargetRollRate = 0.f;
+    float TargetYawRate = 0.f;
+
+    float PitchCmd = 0.f;
+    float RollCmd = 0.f;
+    float YawCmd = 0.f;
+
+    float FL = 0.f;
+    float FR = 0.f;
+    float BL = 0.f;
+    float BR = 0.f;
+
+    float Throttle = 0.f;
+    float PitchInput = 0.f;
+    float RollInput = 0.f;
+    float YawInput = 0.f;
+};
+
 UCLASS()
 class AFPVDronePawn : public ADiplomaPawn
 {
@@ -62,7 +91,7 @@ public:
 
 protected:
     virtual void ApplyThrust() override;
-    //virtual void ApplyTorques() override;
+    virtual void ApplyTorques() override;
 
 private:
 
@@ -115,4 +144,8 @@ private:
     void UpdateMotorThrusts(float DeltaTime);
     void ApplyMotorForces();
     void ApplyAerodynamicDrag();
+
+    //debug
+    FFPVDebugState DebugState;
+    float DebugLogTimer = 0.f;
 };

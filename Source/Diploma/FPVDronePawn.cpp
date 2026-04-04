@@ -1,4 +1,4 @@
-
+п»ї
 #include "FPVDronePawn.h"
 #include "Components/StaticMeshComponent.h"
 
@@ -13,10 +13,10 @@ AFPVDronePawn::AFPVDronePawn()
     MaxRollRate = 120.f;
     MaxYawRate = 60.f;
 
-    // Pitch і Roll — динаміка однакова на симетричному квадрокоптері
-    PitchPID.P = 0.08f;   // менш агресивно ніж 0.3
-    PitchPID.I = 0.02f;   // компенсує зміщення центру мас
-    PitchPID.D = 0.003f;  // гасить перестріл
+    // Pitch С– Roll вЂ” РґРёРЅР°РјС–РєР° РѕРґРЅР°РєРѕРІР° РЅР° СЃРёРјРµС‚СЂРёС‡РЅРѕРјСѓ РєРІР°РґСЂРѕРєРѕРїС‚РµСЂС–
+    PitchPID.P = 0.08f;   // РјРµРЅС€ Р°РіСЂРµСЃРёРІРЅРѕ РЅС–Р¶ 0.3
+    PitchPID.I = 0.02f;   // РєРѕРјРїРµРЅСЃСѓС” Р·РјС–С‰РµРЅРЅСЏ С†РµРЅС‚СЂСѓ РјР°СЃ
+    PitchPID.D = 0.003f;  // РіР°СЃРёС‚СЊ РїРµСЂРµСЃС‚СЂС–Р»
     PitchPID.IntegralClamp = 0.3f;
 
     RollPID.P = 0.08f;
@@ -24,7 +24,7 @@ AFPVDronePawn::AFPVDronePawn()
     RollPID.D = 0.003f;
     RollPID.IntegralClamp = 0.3f;
 
-    // Yaw — інерція по Z більша, реакція повільніша
+    // Yaw вЂ” С–РЅРµСЂС†С–СЏ РїРѕ Z Р±С–Р»СЊС€Р°, СЂРµР°РєС†С–СЏ РїРѕРІС–Р»СЊРЅС–С€Р°
     YawPID.P = 0.05f;
     YawPID.I = 0.01f;
     YawPID.D = 0.004f;
@@ -36,13 +36,22 @@ void AFPVDronePawn::BeginPlay()
     PitchPID.Reset();
     RollPID.Reset();
     YawPID.Reset();
-    InitMotors();
+    InitMotors(); 
+
+    PlaneMesh->SetLinearDamping(0.f);
+    PlaneMesh->SetAngularDamping(0.2f);
     PlaneMesh->SetMassOverrideInKg(NAME_None, 4.5f, true);
-    /*PlaneMesh->RecreatePhysicsState();*/
-    // Перевіряємо що спрацювало — має бути в локальних координатах відносно меша
-    FVector CoM = PlaneMesh->GetBodyInstance()->GetCOMPosition();
-    UE_LOG(LogTemp, Warning, TEXT("BodyInstance CoM world: %s"), *CoM.ToString());
-    //PlaneMesh->BodyInstance.InertiaTensorScale = FVector(0.1f, 0.1f, 0.05f);
+    PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+    PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+
+    const FVector ComWorld = PlaneMesh->GetCenterOfMass();
+    const FVector ComLocal = PlaneMesh->GetComponentTransform().InverseTransformPosition(ComWorld);
+
+    UE_LOG(LogTemp, Warning, TEXT("COM World: %s"), *ComWorld.ToString());
+    UE_LOG(LogTemp, Warning, TEXT("COM Local: %s"), *ComLocal.ToString());
+
+    UE_LOG(LogTemp, Warning, TEXT("Actor Rotation: %s"), *GetActorRotation().ToString());
+    UE_LOG(LogTemp, Warning, TEXT("Mesh Rotation: %s"), *PlaneMesh->GetComponentRotation().ToString());
 
     for (int i = 0; i < Motors.Num(); i++)
     {
@@ -55,23 +64,20 @@ void AFPVDronePawn::BeginPlay()
     MaxThrust = 0.f;
 }
 
-void AFPVDronePawn::Tick(float DeltaSeconds)
-{
-    
-    Super::Tick(DeltaSeconds);
-    /*UE_LOG(LogTemp, Warning, TEXT("Throttle=%.2f Pitch=%.2f Roll=%.2f Yaw=%.2f"),
-        Throttle, PitchInput, RollInput, YawInput);*/
-
-    UpdateMotorThrusts(DeltaSeconds);
-    ApplyThrust();
-    ApplyTorques();
-
-}
-
 void AFPVDronePawn::ApplyThrust()
 {
     ApplyMotorForces();
-    ApplyAerodynamicDrag();
+    //ApplyAerodynamicDrag();
+}
+void AFPVDronePawn::Tick(float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+    UpdateMotorThrusts(DeltaSeconds);
+    ApplyThrust();
+}
+
+void AFPVDronePawn::ApplyTorques()
+{
 }
 
 
@@ -79,17 +85,17 @@ void AFPVDronePawn::InitMotors()
 {
     Motors.SetNum(4);
 
-    Motors[0].LocalPosition = FVector(ArmLength, ArmLength, 0.f);
+    Motors[0].LocalPosition = FVector(ArmLength, -ArmLength, 0.f);
     Motors[0].SpinDirection = 1.f;
 
-    Motors[1].LocalPosition = FVector(ArmLength, -ArmLength, 0.f);
+    Motors[1].LocalPosition = FVector(ArmLength, ArmLength, 0.f);
     Motors[1].SpinDirection = -1.f;
 
-    Motors[2].LocalPosition = FVector(-ArmLength, ArmLength, 0.f);
-    Motors[2].SpinDirection = 1.f;
+    Motors[2].LocalPosition = FVector(-ArmLength, -ArmLength, 0.f);
+    Motors[2].SpinDirection = -1.f;
 
-    Motors[3].LocalPosition = FVector(-ArmLength, -ArmLength, 0.f);
-    Motors[3].SpinDirection = -1.f;
+    Motors[3].LocalPosition = FVector(-ArmLength, ArmLength, 0.f);
+    Motors[3].SpinDirection = 1.f;
 
     for (FMotorState& Motor : Motors)
     {
@@ -105,134 +111,64 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
         return;
     }
 
-
-
+    const FTransform MeshTransform = Mesh->GetComponentTransform();
     const FVector WorldAngVel = Mesh->GetPhysicsAngularVelocityInDegrees();
-    const FVector LocalAngVel = Mesh->GetComponentTransform().InverseTransformVectorNoScale(WorldAngVel);
-
-    //UE_LOG(LogTemp, Warning, TEXT("WorldAngVel: X=%.2f Y=%.2f Z=%.2f"),
-    //    WorldAngVel.X, WorldAngVel.Y, WorldAngVel.Z);
-    //UE_LOG(LogTemp, Warning, TEXT("LocalAngVel: X=%.2f Y=%.2f Z=%.2f"),
-    //    LocalAngVel.X, LocalAngVel.Y, LocalAngVel.Z);
+    const FVector LocalAngVel = MeshTransform.InverseTransformVectorNoScale(WorldAngVel);
 
     const float CurrentPitchRate = LocalAngVel.Y;
-    const float CurrentRollRate = LocalAngVel.X;
-    const float CurrentYawRate = LocalAngVel.Z;
-
     const float TargetPitchRate = GetPitchInput() * MaxPitchRate;
-    const float TargetRollRate = GetRollInput() * MaxRollRate;
-    const float TargetYawRate = YawInput * MaxYawRate;
-
-    const float PitchCmd = FMath::Clamp(PitchPID.Update(TargetPitchRate, CurrentPitchRate, DeltaTime), -1.f, 1.f);
-    const float RollCmd = FMath::Clamp(RollPID.Update(TargetRollRate, CurrentRollRate, DeltaTime), -1.f, 1.f);
-    const float YawCmd = FMath::Clamp(YawPID.Update(TargetYawRate, CurrentYawRate, DeltaTime), -1.f, 1.f);
-    /*if (Throttle < 0.01f)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Motors at zero throttle: FL=%.4f FR=%.4f BL=%.4f BR=%.4f"),
-            Motors[0].ThrustOutput, Motors[1].ThrustOutput,
-            Motors[2].ThrustOutput, Motors[3].ThrustOutput);
-        UE_LOG(LogTemp, Warning, TEXT("PID cmds: Pitch=%.4f Roll=%.4f Yaw=%.4f"),
-            PitchCmd, RollCmd, YawCmd);
-    }*/
+    const float PitchCmd = FMath::Clamp(PitchPID.Update(TargetPitchRate, CurrentPitchRate, DeltaTime), -0.2f, 0.2f);
 
     const float BaseThrottle = FMath::Clamp(Throttle, 0.f, 1.f);
 
-    float FL = BaseThrottle - PitchCmd + RollCmd + YawCmd;
-    float FR = BaseThrottle - PitchCmd - RollCmd - YawCmd;
-    float BL = BaseThrottle + PitchCmd + RollCmd - YawCmd;
-    float BR = BaseThrottle + PitchCmd - RollCmd + YawCmd;
+    const float FL = BaseThrottle - PitchCmd;
+    const float FR = BaseThrottle - PitchCmd;
+    const float BL = BaseThrottle + PitchCmd;
+    const float BR = BaseThrottle + PitchCmd;
 
     Motors[0].ThrustOutput = FMath::Clamp(FL, 0.f, 1.f);
     Motors[1].ThrustOutput = FMath::Clamp(FR, 0.f, 1.f);
     Motors[2].ThrustOutput = FMath::Clamp(BL, 0.f, 1.f);
     Motors[3].ThrustOutput = FMath::Clamp(BR, 0.f, 1.f);
-
-    /*UE_LOG(LogTemp, Warning, TEXT("FL=%.3f FR=%.3f BL=%.3f BR=%.3f"),
-        Motors[0].ThrustOutput, Motors[1].ThrustOutput,
-        Motors[2].ThrustOutput, Motors[3].ThrustOutput);
-    
-    UE_LOG(LogTemp, Warning, TEXT("AngVel Local: X=%.2f Y=%.2f Z=%.2f"),
-        LocalAngVel.X, LocalAngVel.Y, LocalAngVel.Z);
-    UE_LOG(LogTemp, Warning, TEXT("INPUT Pitch=%.2f Roll=%.2f Yaw=%.2f Throttle=%.2f"),
-        GetPitchInput(), GetRollInput(), YawInput, Throttle);*/
-    /*UE_LOG(LogTemp, Warning, TEXT("TargetYaw=%.2f CurrentYaw=%.2f YawCmd=%.3f"),
-        TargetYawRate, CurrentYawRate, YawCmd);*/
-
-    /*UE_LOG(LogTemp, Warning,
-        TEXT("AngVel=%.2f | Target=%.2f | PitchCmd=%.4f | PitchInput=%.3f"),
-        CurrentPitchRate, TargetPitchRate, PitchCmd, GetPitchInput());*/
-
 }
-
 
 void AFPVDronePawn::ApplyMotorForces()
 {
     UStaticMeshComponent* Mesh = GetPlaneMesh();
-    if (!Mesh || Motors.Num() != 4) return;
-
-    // Логуємо вертикальну швидкість і загальну тягу
-    const FVector Vel = Mesh->GetPhysicsLinearVelocity();
-    float TotalThrust = 0.f;
-    for (const FMotorState& Motor : Motors)
-        TotalThrust += Motor.ThrustOutput * MaxMotorThrust * 100.f;
-
-    //UE_LOG(LogTemp, Warning, TEXT("Throttle=%.2f | VelZ=%.1f | TotalThrust=%.0f | Weight=%.0f | Net=%.0f"),
-    //    Throttle, Vel.Z, TotalThrust, 4.5f * 980.f, TotalThrust - 4.5f * 980.f);
+    if (!Mesh || Motors.Num() != 4)
+    {
+        return;
+    }
 
     const FTransform MeshTransform = Mesh->GetComponentTransform();
     const FVector UpVector = MeshTransform.GetUnitAxis(EAxis::Z);
 
-    float TotalYawTorque = 0.f;
-
     for (const FMotorState& Motor : Motors)
     {
         const float ThrustN = Motor.ThrustOutput * MaxMotorThrust;
-
-        // сила
         const FVector Force = UpVector * (ThrustN * 100.f);
         const FVector WorldLocation = MeshTransform.TransformPosition(Motor.LocalPosition);
 
         Mesh->AddForceAtLocation(Force, WorldLocation);
-
-
-        TotalYawTorque += ThrustN * Motor.SpinDirection * MotorYawTorquePerNewton;
-    }
-
-    const FVector LocalTorque(0.f, 0.f, TotalYawTorque * 100.f);
-    const FVector WorldTorque = MeshTransform.TransformVectorNoScale(LocalTorque);
-
-    /*Mesh->AddTorqueInRadians(WorldTorque);*/
-    if (YawInput != 0.f)
-    {
-        Mesh->AddTorqueInRadians(FVector(0, 0, 50000.f * YawInput));
     }
 }
+
 
 void AFPVDronePawn::ApplyAerodynamicDrag()
 {
     UStaticMeshComponent* Mesh = GetPlaneMesh();
     if (!Mesh) return;
 
-    const FVector WorldVel = Mesh->GetPhysicsLinearVelocity(); // cm/s
+    const FVector WorldVel = Mesh->GetPhysicsLinearVelocity();
     if (WorldVel.SizeSquared() < 1.f) return;
-
-    // Переводимо швидкість у локальні координати дрона
     const FTransform MeshTransform = Mesh->GetComponentTransform();
     const FVector LocalVel = MeshTransform.InverseTransformVectorNoScale(WorldVel);
-
-    // Окремий drag по кожній локальній осі
     const FVector LocalDrag(
         -FMath::Sign(LocalVel.X) * DragCoeffHorizontal * LocalVel.X * LocalVel.X,
         -FMath::Sign(LocalVel.Y) * DragCoeffHorizontal * LocalVel.Y * LocalVel.Y,
         -FMath::Sign(LocalVel.Z) * DragCoeffVertical * LocalVel.Z * LocalVel.Z
     );
-
-    // Повертаємо назад у world space і застосовуємо
     const FVector WorldDrag = MeshTransform.TransformVectorNoScale(LocalDrag);
     Mesh->AddForce(WorldDrag);
-
-    //// Кутовий drag (незалежний від кута)
-    //const FVector AngVel = Mesh->GetPhysicsAngularVelocityInRadians();
-    ///*Mesh->AddTorqueInRadians(-AngVel * AngularDragCoeff);*/
     
 }
