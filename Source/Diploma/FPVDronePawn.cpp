@@ -105,26 +105,16 @@ void AFPVDronePawn::InitMotors()
 
 void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
 {
-    UStaticMeshComponent* Mesh = GetPlaneMesh();
-    if (!Mesh || Motors.Num() != 4)
-    {
-        return;
-    }
-
-    const FTransform MeshTransform = Mesh->GetComponentTransform();
-    const FVector WorldAngVel = Mesh->GetPhysicsAngularVelocityInDegrees();
-    const FVector LocalAngVel = MeshTransform.InverseTransformVectorNoScale(WorldAngVel);
-
-    const float CurrentPitchRate = LocalAngVel.Y;
-    const float TargetPitchRate = GetPitchInput() * MaxPitchRate;
-    const float PitchCmd = FMath::Clamp(PitchPID.Update(TargetPitchRate, CurrentPitchRate, DeltaTime), -0.2f, 0.2f);
-
     const float BaseThrottle = FMath::Clamp(Throttle, 0.f, 1.f);
 
-    const float FL = BaseThrottle - PitchCmd;
-    const float FR = BaseThrottle - PitchCmd;
-    const float BL = BaseThrottle + PitchCmd;
-    const float BR = BaseThrottle + PitchCmd;
+    const float PitchCmd = GetPitchInput() * 0.05f;
+    const float RollCmd = -GetRollInput() * 0.05f;
+    const float YawCmd = GetYawInput() * 0.03f;
+
+    const float FL = BaseThrottle - PitchCmd - RollCmd - YawCmd * Motors[0].SpinDirection;
+    const float FR = BaseThrottle - PitchCmd + RollCmd - YawCmd * Motors[1].SpinDirection;
+    const float BL = BaseThrottle + PitchCmd - RollCmd - YawCmd * Motors[2].SpinDirection;
+    const float BR = BaseThrottle + PitchCmd + RollCmd - YawCmd * Motors[3].SpinDirection;
 
     Motors[0].ThrustOutput = FMath::Clamp(FL, 0.f, 1.f);
     Motors[1].ThrustOutput = FMath::Clamp(FR, 0.f, 1.f);
