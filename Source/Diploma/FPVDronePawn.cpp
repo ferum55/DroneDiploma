@@ -14,19 +14,19 @@ AFPVDronePawn::AFPVDronePawn()
     MaxYawRate = 60.f;
 
 
-    PitchPID.P = 0.08f;
+    PitchPID.P = 0.25f;
     PitchPID.I = 0.f;
-    PitchPID.D = 0.f;
+    PitchPID.D = 0.006f;
     PitchPID.IntegralClamp = 0.3f;
 
-    RollPID.P = 0.08f;
+    RollPID.P = 0.5f;
     RollPID.I = 0.f;
-    RollPID.D = 0.f;
+    RollPID.D = 0.006f;
     RollPID.IntegralClamp = 0.3f;
 
-    YawPID.P = 0.05f;
+    YawPID.P = 0.25f;
     YawPID.I = 0.f;
-    YawPID.D = 0.f;
+    YawPID.D = 0.002f;
     YawPID.IntegralClamp = 0.2f;
 }
 void AFPVDronePawn::BeginPlay()
@@ -66,11 +66,18 @@ void AFPVDronePawn::BeginPlay()
 void AFPVDronePawn::ApplyThrust()
 {
     ApplyMotorForces();
-    //ApplyAerodynamicDrag();
+    ApplyAerodynamicDrag();
 }
 void AFPVDronePawn::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
+    if (bAutotuneActive)
+    {
+        TickAutotune(DeltaSeconds);
+        UpdateMotorThrusts(DeltaSeconds);
+        ApplyThrust();
+        return;
+    }
     UpdateMotorThrusts(DeltaSeconds);
     ApplyThrust();
 }
@@ -200,4 +207,469 @@ void AFPVDronePawn::ApplyAerodynamicDrag()
     const FVector WorldDrag = MeshTransform.TransformVectorNoScale(LocalDrag);
     Mesh->AddForce(WorldDrag);
     
+}
+
+
+
+//Tuning PIDs
+void AFPVDronePawn::TuneRollP()
+{
+    StartAutotune(EAutotuneAxis::Roll);
+}
+
+void AFPVDronePawn::TunePitchP()
+{
+    StartAutotune(EAutotuneAxis::Pitch);
+}
+
+void AFPVDronePawn::TuneYawP()
+{
+    StartAutotune(EAutotuneAxis::Yaw);
+}
+
+void AFPVDronePawn::BuildTrainScenario()
+{
+    AutotuneTrainScenario.Reset();
+
+    AutotuneTrainScenario.Add({ 0.50f,  0.00f });
+    AutotuneTrainScenario.Add({ 0.40f,  0.20f });
+    AutotuneTrainScenario.Add({ 0.90f,  0.00f });
+
+    AutotuneTrainScenario.Add({ 0.40f, -0.20f });
+    AutotuneTrainScenario.Add({ 0.90f,  0.00f });
+
+    AutotuneTrainScenario.Add({ 0.35f,  0.50f });
+    AutotuneTrainScenario.Add({ 1.00f,  0.00f });
+
+    AutotuneTrainScenario.Add({ 0.35f, -0.50f });
+    AutotuneTrainScenario.Add({ 1.00f,  0.00f });
+
+    AutotuneTrainScenario.Add({ 0.25f,  1.00f });
+    AutotuneTrainScenario.Add({ 1.20f,  0.00f });
+
+    AutotuneTrainScenario.Add({ 0.25f, -1.00f });
+    AutotuneTrainScenario.Add({ 1.20f,  0.00f });
+}
+
+void AFPVDronePawn::BuildValidationScenario()
+{
+    AutotuneValidationScenario.Reset();
+
+    AutotuneValidationScenario.Add({ 0.50f,  0.00f });
+    AutotuneValidationScenario.Add({ 0.45f,  0.35f });
+    AutotuneValidationScenario.Add({ 0.90f,  0.00f });
+
+    AutotuneValidationScenario.Add({ 0.30f, -0.75f });
+    AutotuneValidationScenario.Add({ 1.00f,  0.00f });
+
+    AutotuneValidationScenario.Add({ 0.20f,  1.00f });
+    AutotuneValidationScenario.Add({ 1.20f,  0.00f });
+}
+
+void AFPVDronePawn::BuildPCandidates(float MinP, float MaxP, float StepP)
+{
+    AutotuneCandidates.Reset();
+
+    for (float P = MinP; P <= MaxP + KINDA_SMALL_NUMBER; P += StepP)
+    {
+        FPIDCandidate Candidate;
+        Candidate.P = P;
+        Candidate.I = 0.f;
+        Candidate.D = 0.f;
+        AutotuneCandidates.Add(Candidate);
+    }
+}
+
+void AFPVDronePawn::StartAutotune(EAutotuneAxis Axis)
+{
+    if (!PlaneMesh)
+    {
+        return;
+    }
+
+    bAutotuneActive = true;
+    bAutotuneValidationPhase = false;
+    AutotuneAxis = Axis;
+
+    BuildTrainScenario();
+    BuildValidationScenario();
+    BuildPCandidates(0.02f, 0.25f, 0.01f);
+
+    BuildTrainScenario();
+    BuildValidationScenario();
+
+   /* AutotuneCandidates.Reset();*/
+
+    /*FPIDCandidate A;
+    A.P = 0.02f;
+    A.I = 0.f;
+    A.D = 0.f;
+    AutotuneCandidates.Add(A);
+
+    FPIDCandidate B;
+    B.P = 0.08f;
+    B.I = 0.f;
+    B.D = 0.f;
+    AutotuneCandidates.Add(B);
+
+    FPIDCandidate C;
+    C.P = 0.15f;
+    C.I = 0.f;
+    C.D = 0.f;
+    AutotuneCandidates.Add(C);*/
+
+    AutotuneStartLocation = GetActorLocation();
+    AutotuneStartRotation = GetActorRotation();
+
+    BestCost = TNumericLimits<float>::Max();
+    BestCandidate = FPIDCandidate();
+    BestMetrics = FAutotuneMetrics();
+
+    AutotuneCandidateIndex = 0;
+
+    BeginAutotuneRun();
+}
+
+void AFPVDronePawn::BeginAutotuneRun()
+{
+    if (!AutotuneCandidates.IsValidIndex(AutotuneCandidateIndex))
+    {
+        bAutotuneActive = false;
+        return;
+    }
+
+    CurrentCandidate = AutotuneCandidates[AutotuneCandidateIndex];
+    ApplyPIDCandidate(CurrentCandidate);
+    ResetAutotuneRunState();
+
+    UE_LOG(LogTemp, Warning, TEXT("Autotune run begin"));
+    UE_LOG(LogTemp, Warning, TEXT("Axis=%d CandidateIndex=%d P=%.4f I=%.4f D=%.4f"),
+        static_cast<int32>(AutotuneAxis),
+        AutotuneCandidateIndex,
+        CurrentCandidate.P,
+        CurrentCandidate.I,
+        CurrentCandidate.D);
+}
+void AFPVDronePawn::SetAutotuneInputs(float AxisInput)
+{
+    PitchInput = 0.f;
+    RollInput = 0.f;
+    YawInput = 0.f;
+
+    switch (AutotuneAxis)
+    {
+    case EAutotuneAxis::Roll:
+        RollInput = AxisInput;
+        break;
+
+    case EAutotuneAxis::Pitch:
+        PitchInput = AxisInput;
+        break;
+
+    case EAutotuneAxis::Yaw:
+        YawInput = AxisInput;
+        break;
+    }
+}
+
+void AFPVDronePawn::TickAutotune(float DeltaTime)
+{
+    const TArray<FAutotuneSegment>& Scenario =
+        bAutotuneValidationPhase ? AutotuneValidationScenario : AutotuneTrainScenario;
+
+    if (!Scenario.IsValidIndex(AutotuneSegmentIndex))
+    {
+        FinishAutotuneRun();
+        return;
+    }
+
+    const FAutotuneSegment& Segment = Scenario[AutotuneSegmentIndex];
+
+    SetAutotuneInputs(Segment.Input);
+    Throttle = AutotuneThrottle;
+
+    CollectAutotuneMetrics(DeltaTime);
+
+    AutotuneSegmentTime += DeltaTime;
+
+    if (AutotuneSegmentTime >= Segment.Duration)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Segment finished: Index=%d Duration=%.2f Input=%.2f"),
+            AutotuneSegmentIndex,
+            Segment.Duration,
+            Segment.Input);
+
+        AutotuneSegmentIndex++;
+        AutotuneSegmentTime = 0.f;
+    }
+}
+
+void AFPVDronePawn::ApplyPIDCandidate(const FPIDCandidate& Candidate)
+{
+    switch (AutotuneAxis)
+    {
+    case EAutotuneAxis::Roll:
+        RollPID.P = Candidate.P;
+        RollPID.I = Candidate.I;
+        RollPID.D = Candidate.D;
+        break;
+
+    case EAutotuneAxis::Pitch:
+        PitchPID.P = Candidate.P;
+        PitchPID.I = Candidate.I;
+        PitchPID.D = Candidate.D;
+        break;
+
+    case EAutotuneAxis::Yaw:
+        YawPID.P = Candidate.P;
+        YawPID.I = Candidate.I;
+        YawPID.D = Candidate.D;
+        break;
+    }
+}
+void AFPVDronePawn::ResetAutotuneRunState()
+{
+    SetActorLocationAndRotation(
+        AutotuneStartLocation,
+        AutotuneStartRotation,
+        false,
+        nullptr,
+        ETeleportType::TeleportPhysics
+    );
+
+    PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+    PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+
+    PitchPID.Reset();
+    RollPID.Reset();
+    YawPID.Reset();
+
+    for (FMotorState& Motor : Motors)
+    {
+        Motor.ThrustOutput = 0.f;
+    }
+
+    CurrentMetrics = FAutotuneMetrics();
+    AutotuneSegmentIndex = 0;
+    AutotuneSegmentTime = 0.f;
+    AutotunePrevError = 0.f;
+
+    Throttle = AutotuneThrottle;
+    PitchInput = 0.f;
+    RollInput = 0.f;
+    YawInput = 0.f;
+
+    LastPitchCmd = 0.f;
+    LastRollCmd = 0.f;
+    LastYawCmd = 0.f;
+
+    ReleasePhaseTime = 0.f;
+    bWasInReleasePhase = false;
+}
+
+float AFPVDronePawn::GetCurrentAxisRateNorm() const
+{
+    if (!PlaneMesh)
+    {
+        return 0.f;
+    }
+
+    const FTransform MeshTransform = PlaneMesh->GetComponentTransform();
+    const FVector WorldAngVelDeg = PlaneMesh->GetPhysicsAngularVelocityInDegrees();
+    const FVector LocalAngVelDeg = MeshTransform.InverseTransformVectorNoScale(WorldAngVelDeg);
+
+    switch (AutotuneAxis)
+    {
+    case EAutotuneAxis::Roll:
+        return LocalAngVelDeg.X / MaxRollRate;
+
+    case EAutotuneAxis::Pitch:
+        return LocalAngVelDeg.Y / MaxPitchRate;
+
+    case EAutotuneAxis::Yaw:
+        return LocalAngVelDeg.Z / MaxYawRate;
+    }
+
+    return 0.f;
+}
+
+float AFPVDronePawn::GetCurrentTargetRateNorm() const
+{
+    switch (AutotuneAxis)
+    {
+    case EAutotuneAxis::Roll:
+        return -RollInput;
+
+    case EAutotuneAxis::Pitch:
+        return PitchInput;
+
+    case EAutotuneAxis::Yaw:
+        return YawInput;
+    }
+
+    return 0.f;
+}
+
+void AFPVDronePawn::CollectAutotuneMetrics(float DeltaTime)
+{
+    const float TargetRateNorm = GetCurrentTargetRateNorm();
+    const float CurrentRateNorm = GetCurrentAxisRateNorm();
+    const float Error = TargetRateNorm - CurrentRateNorm;
+
+    CurrentMetrics.TrackingError += FMath::Abs(Error) * DeltaTime;
+
+    if (FMath::Abs(TargetRateNorm) > KINDA_SMALL_NUMBER)
+    {
+        const float SignedRate = CurrentRateNorm * FMath::Sign(TargetRateNorm);
+        const float SignedTarget = FMath::Abs(TargetRateNorm);
+
+        const float Excess = FMath::Max(0.f, SignedRate - SignedTarget);
+        CurrentMetrics.Overshoot += Excess * DeltaTime;
+
+        const float Deficit = FMath::Max(0.f, SignedTarget * 0.85f - SignedRate);
+        CurrentMetrics.ResponsePenalty += Deficit * DeltaTime;
+    }
+
+    const bool bReleasePhase = FMath::Abs(TargetRateNorm) < KINDA_SMALL_NUMBER;
+
+    if (bReleasePhase)
+    {
+        if (!bWasInReleasePhase)
+        {
+            ReleasePhaseTime = 0.f;
+        }
+
+        ReleasePhaseTime += DeltaTime;
+
+        if (ReleasePhaseTime <= 0.35f)
+        {
+            if (FMath::Abs(CurrentRateNorm) > 0.05f)
+            {
+                CurrentMetrics.ReleaseSettling += DeltaTime;
+            }
+        }
+    }
+    else
+    {
+        ReleasePhaseTime = 0.f;
+    }
+
+    bWasInReleasePhase = bReleasePhase;
+
+    if (FMath::Abs(Error) > 0.08f && FMath::Abs(AutotunePrevError) > 0.08f)
+    {
+        if (FMath::Sign(Error) != FMath::Sign(AutotunePrevError))
+        {
+            CurrentMetrics.OscillationPenalty += DeltaTime;
+        }
+    }
+
+    for (const FMotorState& Motor : Motors)
+    {
+        if (Motor.ThrustOutput < 0.02f || Motor.ThrustOutput > 0.98f)
+        {
+            CurrentMetrics.SaturationPenalty += DeltaTime * 0.25f;
+        }
+    }
+
+    AutotunePrevError = Error;
+}
+
+bool AFPVDronePawn::IsAutotuneCandidateAcceptable(const FAutotuneMetrics& Metrics) const
+{
+    if (Metrics.ReleaseSettling > 2.f)
+    {
+        return false;
+    }
+
+    if (Metrics.OscillationPenalty > 0.15f)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+float AFPVDronePawn::ComputeAutotuneCost(const FAutotuneMetrics& Metrics) const
+{
+    if (!IsAutotuneCandidateAcceptable(Metrics))
+    {
+        return 1000000.f;
+    }
+
+    return
+        10.0f * Metrics.ResponsePenalty +
+        4.0f * Metrics.TrackingError +
+        1.0f * Metrics.Overshoot +
+        0.5f * Metrics.SaturationPenalty;
+}
+
+void AFPVDronePawn::FinishAutotuneRun()
+{
+    CurrentMetrics.Cost = ComputeAutotuneCost(CurrentMetrics);
+
+    UE_LOG(LogTemp, Warning, TEXT("Autotune candidate finished"));
+    UE_LOG(LogTemp, Warning, TEXT("Axis=%d CandidateIndex=%d P=%.4f I=%.4f D=%.4f"),
+        static_cast<int32>(AutotuneAxis),
+        AutotuneCandidateIndex,
+        CurrentCandidate.P,
+        CurrentCandidate.I,
+        CurrentCandidate.D);
+
+    UE_LOG(LogTemp, Warning, TEXT("TrackingError=%.6f ResponsePenalty=%.6f Overshoot=%.6f ReleaseSettling=%.6f OscillationPenalty=%.6f SaturationPenalty=%.6f Cost=%.6f"),
+        CurrentMetrics.TrackingError,
+        CurrentMetrics.ResponsePenalty,
+        CurrentMetrics.Overshoot,
+        CurrentMetrics.ReleaseSettling,
+        CurrentMetrics.OscillationPenalty,
+        CurrentMetrics.SaturationPenalty,
+        CurrentMetrics.Cost);
+
+    if (CurrentMetrics.Cost < BestCost)
+    {
+        BestCost = CurrentMetrics.Cost;
+        BestCandidate = CurrentCandidate;
+        BestMetrics = CurrentMetrics;
+
+        UE_LOG(LogTemp, Warning, TEXT("New best candidate: P=%.4f I=%.4f D=%.4f Cost=%.6f"),
+            BestCandidate.P,
+            BestCandidate.I,
+            BestCandidate.D,
+            BestCost);
+    }
+
+    AdvanceAutotuneCandidate();
+}
+
+void AFPVDronePawn::AdvanceAutotuneCandidate()
+{
+    AutotuneCandidateIndex++;
+
+    if (AutotuneCandidates.IsValidIndex(AutotuneCandidateIndex))
+    {
+        BeginAutotuneRun();
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Autotune finished for axis %d"),
+        static_cast<int32>(AutotuneAxis));
+
+    UE_LOG(LogTemp, Warning, TEXT("Best candidate: P=%.4f I=%.4f D=%.4f Cost=%.6f"),
+        BestCandidate.P,
+        BestCandidate.I,
+        BestCandidate.D,
+        BestCost);
+
+    UE_LOG(LogTemp, Warning, TEXT("Best metrics: TrackingError=%.6f ResponsePenalty=%.6f Overshoot=%.6f ReleaseSettling=%.6f OscillationPenalty=%.6f SaturationPenalty=%.6f"),
+        BestMetrics.TrackingError,
+        BestMetrics.ResponsePenalty,
+        BestMetrics.Overshoot,
+        BestMetrics.ReleaseSettling,
+        BestMetrics.OscillationPenalty,
+        BestMetrics.SaturationPenalty);
+
+    ApplyPIDCandidate(BestCandidate);
+
+    bAutotuneActive = false;
+    SetAutotuneInputs(0.f);
 }
