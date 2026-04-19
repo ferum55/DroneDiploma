@@ -41,14 +41,23 @@ struct FMotorState
 {
     GENERATED_BODY()
 
-    // Позиція мотора відносно центру мас (у локальних координатах)
-    UPROPERTY(EditAnywhere) FVector LocalPosition = FVector::ZeroVector;
+    UPROPERTY(EditAnywhere)
+    FVector LocalPosition = FVector::ZeroVector;
 
-    // Напрямок обертання: +1 CCW, -1 CW (впливає на yaw torque)
-    UPROPERTY(EditAnywhere) float SpinDirection = 1.f;
+    UPROPERTY(EditAnywhere)
+    float SpinDirection = 1.f;
 
-    // Поточна тяга мотора (0..1)
-    float ThrustOutput = 0.f;
+    float Command = 0.f;
+    float CurrentCommand = 0.f;
+
+    float TargetRPM = 0.f;
+    float CurrentRPM = 0.f;
+
+    float ThrustNewton = 0.f;
+    float CurrentDrawAmp = 0.f;
+    float ElectricalPowerWatt = 0.f;
+    float MechanicalPowerWatt = 0.f;
+    float ReactionTorqueNm = 0.f;
 };
 
 USTRUCT()
@@ -159,13 +168,13 @@ protected:
 private:
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float DragCoeffHorizontal = 0.0014f;  // лобовий опір (XY в локальних)
+    float DragCoeffForward = 0.00025f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float DragCoeffVertical = 0.005f;     // дисковий опір (Z в локальних)
+    float DragCoeffLateral = 0.00070f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float AngularDragCoeff = 500.f;
+    float DragCoeffVertical = 0.005f;
 
     // Мотори: FL, FR, BL, BR
     UPROPERTY(EditAnywhere, Category = "FPV|Motors")
@@ -183,7 +192,6 @@ private:
     UPROPERTY(EditAnywhere, Category = "FPV|Motors")
     float MotorYawTorquePerNewton;
 
-    // Цільові кутові швидкості (deg/s) — задаються стіком
     UPROPERTY(EditAnywhere, Category = "FPV|Rates")
     float MaxPitchRate = 360.f;
 
@@ -202,6 +210,55 @@ private:
 
     UPROPERTY(EditAnywhere, Category = "FPV|PID")
     FPIDController YawPID;
+
+
+    UPROPERTY(EditAnywhere, Category = "FPV|ForwardFlight")
+    float PropwashSpeedScaleMps = 30.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|ForwardFlight")
+    float MinPropEfficiency = 0.85f;
+
+
+    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
+    float MotorPropTorqueCoeff = 0.00000002f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
+    float MotorResponseUp = 8.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
+    float MotorResponseDown = 6.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
+    float MotorThrustScale = 0.90f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
+    float MotorTorquePerNewtonMeter = 0.032f;
+
+
+    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
+    float MotorKV = 800.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
+    float MotorVoltageLoaded = 23.8f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
+    float MotorResponseUpRPM = 14.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
+    float MotorResponseDownRPM = 10.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
+    float MotorMechanicalEfficiency = 0.85f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
+    float MinOmegaRad = 30.f;
+
+    float EvaluateMotorThrustGrams(float Command) const;
+    float EvaluateMotorCurrentAmp(float Command) const;
+    float EvaluateMotorPowerWatt(float Command) const;
+    void UpdateMotorDynamics(float DeltaTime);
+    float ComputePropEfficiencyFactor(const FVector& LocalVelocityMps) const;
+
 
     void InitMotors();
     void UpdateMotorThrusts(float DeltaTime);
