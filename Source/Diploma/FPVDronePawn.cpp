@@ -208,11 +208,28 @@ void AFPVDronePawn::ApplyMotorForces()
 
 float AFPVDronePawn::ComputePropEfficiencyFactor(const FVector& LocalVelocityMps) const
 {
-    const float AxialSpeedMps = FMath::Abs(LocalVelocityMps.Z);
+    const float VerticalSpeedMps = FMath::Abs(LocalVelocityMps.Z);
+    const float ForwardSpeedMps = FMath::Max(LocalVelocityMps.X, 0.f);
 
-    const float Ratio = AxialSpeedMps / FMath::Max(PropwashSpeedScaleMps, 0.1f);
-    const float Efficiency = 1.f - 1.f * FMath::Clamp(Ratio * Ratio, 0.f, 1.f);
+    const float VerticalRatio = VerticalSpeedMps / FMath::Max(PropwashSpeedScaleMps, 0.1f);
+    const float VerticalPenalty = 0.08f * FMath::Clamp(VerticalRatio * VerticalRatio, 0.f, 1.f);
 
+    const float ForwardStartMps = 12.f;
+    const float ForwardFullMps = 32.f;
+
+    float ForwardAlpha = 0.f;
+    if (ForwardFullMps > ForwardStartMps)
+    {
+        ForwardAlpha = FMath::Clamp(
+            (ForwardSpeedMps - ForwardStartMps) / (ForwardFullMps - ForwardStartMps),
+            0.f,
+            1.f
+        );
+    }
+
+    const float ForwardPenalty = 0.28f * ForwardAlpha * ForwardAlpha;
+
+    const float Efficiency = 1.f - VerticalPenalty - ForwardPenalty;
     return FMath::Clamp(Efficiency, MinPropEfficiency, 1.f);
 }
 
@@ -260,66 +277,46 @@ void AFPVDronePawn::ApplyAerodynamicDrag()
 }
 
 
-float AFPVDronePawn::EvaluateMotorPowerWatt(float Command) const
-{
-    const float C = FMath::Clamp(Command, 0.f, 1.f);
-
-    static const TArray<float> X = { 0.00f, 0.08f, 0.16f, 0.24f, 0.32f, 0.40f, 0.48f, 1.00f };
-    static const TArray<float> Y = { 0.0f, 135.575f, 270.25f, 404.275f, 537.70f, 671.275f, 803.60f, 1631.0f };
-
-    if (C <= X[0]) return Y[0];
-    if (C >= X.Last()) return Y.Last();
-
-    for (int32 i = 0; i < X.Num() - 1; i++)
-    {
-        if (C >= X[i] && C <= X[i + 1])
-        {
-            const float Alpha = (C - X[i]) / (X[i + 1] - X[i]);
-            return FMath::Lerp(Y[i], Y[i + 1], Alpha);
-        }
-    }
-
-    return Y.Last();
-}
-
-
-float AFPVDronePawn::EvaluateMotorThrustGrams(float Command) const
-{
-    const float C = FMath::Clamp(Command, 0.f, 1.f);
-
-    static const TArray<float> X = { 0.00f, 0.08f, 0.16f, 0.24f, 0.32f, 0.40f, 0.48f, 1.00f };
-    static const TArray<float> Y = { 0.0f, 824.0f, 1427.5f, 1892.5f, 2253.0f, 2606.5f, 2916.0f, 4557.0f };
-
-    if (C <= X[0]) return Y[0];
-    if (C >= X.Last()) return Y.Last();
-
-    for (int32 i = 0; i < X.Num() - 1; i++)
-    {
-        if (C >= X[i] && C <= X[i + 1])
-        {
-            const float Alpha = (C - X[i]) / (X[i + 1] - X[i]);
-            return FMath::Lerp(Y[i], Y[i + 1], Alpha);
-        }
-    }
-
-    return Y.Last();
-}
-
 float AFPVDronePawn::EvaluateMotorCurrentAmp(float Command) const
 {
     const float C = FMath::Clamp(Command, 0.f, 1.f);
+    return 65.9f * FMath::Pow(C, 2.718f);;
+}
+float AFPVDronePawn::EvaluateMotorThrustGramsFromCurrent(float CurrentAmp) const
+{
+    static const TArray<float> X = { 0.f, 5.f, 10.f, 15.f, 20.f, 25.f, 30.f, 65.9f };
+    static const TArray<float> Y = { 0.f, 835.f, 1420.f, 1885.f, 2200.f, 2521.f, 2828.f, 4680.f };
 
-    static const TArray<float> X = { 0.00f, 0.08f, 0.16f, 0.24f, 0.32f, 0.40f, 0.48f, 1.00f };
-    static const TArray<float> Y = { 0.0f, 5.0f, 10.0f, 15.0f, 20.0f, 25.0f, 30.0f, 62.35f };
+    const float A = FMath::Clamp(CurrentAmp, 0.f, X.Last());
 
-    if (C <= X[0]) return Y[0];
-    if (C >= X.Last()) return Y.Last();
+    if (A <= X[0]) return Y[0];
+    if (A >= X.Last()) return Y.Last();
 
     for (int32 i = 0; i < X.Num() - 1; i++)
     {
-        if (C >= X[i] && C <= X[i + 1])
+        if (A >= X[i] && A <= X[i + 1])
         {
-            const float Alpha = (C - X[i]) / (X[i + 1] - X[i]);
+            const float Alpha = (A - X[i]) / (X[i + 1] - X[i]);
+            return FMath::Lerp(Y[i], Y[i + 1], Alpha);
+        }
+    }
+
+    return Y.Last();
+}float AFPVDronePawn::EvaluateMotorPowerWattFromCurrent(float CurrentAmp) const
+{
+    static const TArray<float> X = { 0.f, 5.f, 10.f, 15.f, 20.f, 25.f, 30.f, 65.9f };
+    static const TArray<float> Y = { 0.f, 120.40f, 239.90f, 358.70f, 477.20f, 594.80f, 711.40f, 1537.40f };
+
+    const float A = FMath::Clamp(CurrentAmp, 0.f, X.Last());
+
+    if (A <= X[0]) return Y[0];
+    if (A >= X.Last()) return Y.Last();
+
+    for (int32 i = 0; i < X.Num() - 1; i++)
+    {
+        if (A >= X[i] && A <= X[i + 1])
+        {
+            const float Alpha = (A - X[i]) / (X[i + 1] - X[i]);
             return FMath::Lerp(Y[i], Y[i + 1], Alpha);
         }
     }
@@ -348,31 +345,35 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
         Motor.TargetRPM = Motor.CurrentCommand * MotorKV * MotorVoltageLoaded;
         Motor.CurrentRPM = FMath::FInterpTo(Motor.CurrentRPM, Motor.TargetRPM, DeltaTime, ResponseSpeed);
 
-        const float ThrustGrams = EvaluateMotorThrustGrams(Motor.CurrentCommand);
+        Motor.CurrentDrawAmp = EvaluateMotorCurrentAmp(Motor.CurrentCommand);
+
+        const float ThrustGrams = EvaluateMotorThrustGramsFromCurrent(Motor.CurrentDrawAmp);
         Motor.ThrustNewton = ThrustGrams * 0.001f * 9.81f * PropEfficiencyFactor;
 
-        Motor.CurrentDrawAmp = EvaluateMotorCurrentAmp(Motor.CurrentCommand);
-        Motor.ElectricalPowerWatt = EvaluateMotorPowerWatt(Motor.CurrentCommand);
+        Motor.ElectricalPowerWatt = EvaluateMotorPowerWattFromCurrent(Motor.CurrentDrawAmp);
         Motor.MechanicalPowerWatt = Motor.ElectricalPowerWatt * MotorMechanicalEfficiency;
 
         Motor.ReactionTorqueNm = MotorPropTorqueCoeff * Motor.CurrentRPM * Motor.CurrentRPM * Motor.SpinDirection;
+        
         {
             static float PropLogTimer = 0.f;
             PropLogTimer += DeltaTime;
 
-            if (PropLogTimer >= 0.25f)
+            if (PropLogTimer >= 0.5f)
             {
                 PropLogTimer = 0.f;
 
+                const float TotalKmh = (WorldVelocityCm.Size() / 100.f) * 3.6f;
+
                 UE_LOG(LogTemp, Warning,
-                    TEXT("PROP EFF | Thr=%.3f | LocalVel=(%.2f %.2f %.2f) | Eff=%.3f | ThrustBase=%.2f N | ThrustFinal=%.2f N"),
+                    TEXT("PROP | Thr=%.2f | Cmd=%.3f | I=%.1f A | Speed=%.1f kmh | RPM=%.0f | Thrust=%.2f N | Power=%.0f W"),
                     Throttle,
-                    LocalVelocityMps.X,
-                    LocalVelocityMps.Y,
-                    LocalVelocityMps.Z,
-                    PropEfficiencyFactor,
-                    ThrustGrams * 0.001f * 9.81f,
-                    Motor.ThrustNewton
+                    Motor.CurrentCommand,
+                    Motor.CurrentDrawAmp,
+                    TotalKmh,
+                    Motor.CurrentRPM,
+                    Motor.ThrustNewton,
+                    Motor.ElectricalPowerWatt
                 );
             }
         }

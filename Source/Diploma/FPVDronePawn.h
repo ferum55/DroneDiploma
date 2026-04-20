@@ -172,7 +172,7 @@ private:
     float AirDensity = 1.225f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float CdForward = 22.f;
+    float CdForward = 14.f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
     float CdLateral = 5.f;
@@ -238,7 +238,7 @@ private:
     float PropwashSpeedScaleMps = 22.f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|ForwardFlight")
-    float MinPropEfficiency = 0.75f;
+    float MinPropEfficiency = 0.68f;
 
 
     UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
@@ -275,9 +275,9 @@ private:
     UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
     float MinOmegaRad = 30.f;
 
-    float EvaluateMotorThrustGrams(float Command) const;
     float EvaluateMotorCurrentAmp(float Command) const;
-    float EvaluateMotorPowerWatt(float Command) const;
+    float EvaluateMotorThrustGramsFromCurrent(float CurrentAmp) const;
+    float EvaluateMotorPowerWattFromCurrent(float CurrentAmp) const;
     void UpdateMotorDynamics(float DeltaTime);
     float ComputePropEfficiencyFactor(const FVector& LocalVelocityMps) const;
 
