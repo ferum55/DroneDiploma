@@ -13,21 +13,21 @@ AFPVDronePawn::AFPVDronePawn()
     MotorMechanicalEfficiency = 0.85f;
     MinOmegaRad = 30.f;
 
-    MaxPitchRate = 120.f;
-    MaxRollRate = 120.f;
-    MaxYawRate = 120.f;
+    MaxPitchRate = 360.f;
+    MaxRollRate = 360.f;
+    MaxYawRate = 360.f;
 
-    PitchPID.P = 0.25f;
+    PitchPID.P = 0.8f; //0.25f;
     PitchPID.I = 0.f;
     PitchPID.D = 0.006f;
     PitchPID.IntegralClamp = 0.3f;
 
-    RollPID.P = 0.5f;
+    RollPID.P = 0.8f;
     RollPID.I = 0.f;
     RollPID.D = 0.006f;
     RollPID.IntegralClamp = 0.3f;
 
-    YawPID.P = 0.25f;
+    YawPID.P = 0.8f;
     YawPID.I = 0.f;
     YawPID.D = 0.002f;
     YawPID.IntegralClamp = 0.2f;
@@ -211,7 +211,7 @@ float AFPVDronePawn::ComputePropEfficiencyFactor(const FVector& LocalVelocityMps
     const float AxialSpeedMps = FMath::Abs(LocalVelocityMps.Z);
 
     const float Ratio = AxialSpeedMps / FMath::Max(PropwashSpeedScaleMps, 0.1f);
-    const float Efficiency = 1.f - 0.2f * FMath::Clamp(Ratio * Ratio, 0.f, 1.f);
+    const float Efficiency = 1.f - 1.f * FMath::Clamp(Ratio * Ratio, 0.f, 1.f);
 
     return FMath::Clamp(Efficiency, MinPropEfficiency, 1.f);
 }
@@ -219,69 +219,46 @@ float AFPVDronePawn::ComputePropEfficiencyFactor(const FVector& LocalVelocityMps
 void AFPVDronePawn::ApplyAerodynamicDrag()
 {
     UStaticMeshComponent* Mesh = GetPlaneMesh();
-    if (!Mesh) return;
+    if (!Mesh)
+    {
+        return;
+    }
 
-    const FVector WorldVel = Mesh->GetPhysicsLinearVelocity();
-    if (WorldVel.SizeSquared() < 1.f) return;
+    const FVector WorldVelCm = Mesh->GetPhysicsLinearVelocity();
+    if (WorldVelCm.SizeSquared() < 1.f)
+    {
+        return;
+    }
+
     const FTransform MeshTransform = Mesh->GetComponentTransform();
-    const FVector LocalVel = MeshTransform.InverseTransformVectorNoScale(WorldVel);
-    const FVector LocalDrag(
-        -FMath::Sign(LocalVel.X) * DragCoeffForward * LocalVel.X * LocalVel.X,
-        -FMath::Sign(LocalVel.Y) * DragCoeffLateral * LocalVel.Y * LocalVel.Y,
-        -FMath::Sign(LocalVel.Z) * DragCoeffVertical * LocalVel.Z * LocalVel.Z
+    const FVector LocalVelMps = MeshTransform.InverseTransformVectorNoScale(WorldVelCm) / 100.f;
+
+    auto ComputeAxisDrag = [this](float VelocityMps, float Cd, float Area) -> float
+        {
+            const float SpeedAbs = FMath::Abs(VelocityMps);
+            const float DragMagnitude = 0.5f * AirDensity * Cd * Area * SpeedAbs * SpeedAbs;
+            return -FMath::Sign(VelocityMps) * DragMagnitude;
+        };
+
+    const float DragX_N = ComputeAxisDrag(LocalVelMps.X, CdForward, AreaForward);
+    const float DragY_N = ComputeAxisDrag(LocalVelMps.Y, CdLateral, AreaLateral);
+    const float DragZBody_N = ComputeAxisDrag(LocalVelMps.Z, CdVertical, AreaVertical);
+
+    const float RotorDiscRadiusM = RotorDiscDiameterM * 0.5f;
+    const float TotalRotorDiscAreaM2 = 4.f * PI * RotorDiscRadiusM * RotorDiscRadiusM;
+    const float EffectiveRotorAreaM2 = TotalRotorDiscAreaM2 * RotorVerticalAreaFactor;
+    const float DragZRotor_N = ComputeAxisDrag(LocalVelMps.Z, RotorVerticalCd, EffectiveRotorAreaM2);
+
+    const FVector LocalDragN(
+        DragX_N,
+        DragY_N,
+        DragZBody_N + DragZRotor_N
     );
 
-    const FVector WorldDrag = MeshTransform.TransformVectorNoScale(LocalDrag);
-    Mesh->AddForce(WorldDrag);
-    {
-        static float DragLogTimer = 0.f;
-        DragLogTimer += GetWorld()->GetDeltaSeconds();
-
-        if (DragLogTimer >= 0.25f)
-        {
-            DragLogTimer = 0.f;
-
-            float TotalThrustN = 0.f;
-            for (const FMotorState& Motor : Motors)
-            {
-                TotalThrustN += Motor.ThrustNewton;
-            }
-
-           
-            const FVector UpVector = MeshTransform.GetUnitAxis(EAxis::Z);
-            const FVector ThrustWorldN = UpVector * TotalThrustN;
-
-            const float ThrustVerticalN = FVector::DotProduct(ThrustWorldN, FVector::UpVector);
-            const FVector HorizontalThrust = ThrustWorldN - FVector::UpVector * ThrustVerticalN;
-            const float ThrustHorizontalN = HorizontalThrust.Size();
-
-            const float SpeedKmh = WorldVel.Size() * 0.036f;
-            const float ForwardSpeedMps = LocalVel.X / 100.f;
-            const float LateralSpeedMps = LocalVel.Y / 100.f;
-            const float VerticalSpeedMps = LocalVel.Z / 100.f;
-
-            const float DragForwardN = LocalDrag.X / 100.f;
-            const float DragLateralN = LocalDrag.Y / 100.f;
-            const float DragVerticalN = LocalDrag.Z / 100.f;
-
-            UE_LOG(LogTemp, Warning,
-                TEXT("AERO | Thr=%.3f Speed=%.1f kmh | LocalVel mps X=%.2f Y=%.2f Z=%.2f | Drag N X=%.2f Y=%.2f Z=%.2f | TotalThrust=%.2f N | ThrustHorizontal=%.2f N | ThrustVertical=%.2f N"),
-                Throttle,
-                SpeedKmh,
-                ForwardSpeedMps,
-                LateralSpeedMps,
-                VerticalSpeedMps,
-                DragForwardN,
-                DragLateralN,
-                DragVerticalN,
-                TotalThrustN,
-                ThrustHorizontalN,
-                ThrustVerticalN
-            );
-        }
-    }
-    
+    const FVector WorldDragCm = MeshTransform.TransformVectorNoScale(LocalDragN * 100.f);
+    Mesh->AddForce(WorldDragCm);
 }
+
 
 float AFPVDronePawn::EvaluateMotorPowerWatt(float Command) const
 {
@@ -379,6 +356,26 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
         Motor.MechanicalPowerWatt = Motor.ElectricalPowerWatt * MotorMechanicalEfficiency;
 
         Motor.ReactionTorqueNm = MotorPropTorqueCoeff * Motor.CurrentRPM * Motor.CurrentRPM * Motor.SpinDirection;
+        {
+            static float PropLogTimer = 0.f;
+            PropLogTimer += DeltaTime;
+
+            if (PropLogTimer >= 0.25f)
+            {
+                PropLogTimer = 0.f;
+
+                UE_LOG(LogTemp, Warning,
+                    TEXT("PROP EFF | Thr=%.3f | LocalVel=(%.2f %.2f %.2f) | Eff=%.3f | ThrustBase=%.2f N | ThrustFinal=%.2f N"),
+                    Throttle,
+                    LocalVelocityMps.X,
+                    LocalVelocityMps.Y,
+                    LocalVelocityMps.Z,
+                    PropEfficiencyFactor,
+                    ThrustGrams * 0.001f * 9.81f,
+                    Motor.ThrustNewton
+                );
+            }
+        }
     }
 }
 

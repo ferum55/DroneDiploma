@@ -167,14 +167,36 @@ protected:
 
 private:
 
+    //Drag
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float DragCoeffForward = 0.00025f;
+    float AirDensity = 1.225f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float DragCoeffLateral = 0.00070f;
+    float CdForward = 22.f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float DragCoeffVertical = 0.005f;
+    float CdLateral = 5.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Physics")
+    float CdVertical = 2.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Physics")
+    float AreaForward = 0.003916f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Physics")
+    float AreaLateral = 0.013713f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Physics")
+    float AreaVertical = 0.053621f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Physics")
+    float RotorDiscDiameterM = 0.254f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Physics")
+    float RotorVerticalAreaFactor = 1.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Physics")
+    float RotorVerticalCd = 2.f;
 
     // Мотори: FL, FR, BL, BR
     UPROPERTY(EditAnywhere, Category = "FPV|Motors")
@@ -182,24 +204,24 @@ private:
 
     // Відстань від центру до мотора по X і Y (половина wheelbase)
     UPROPERTY(EditAnywhere, Category = "FPV|Motors")
-    float ArmLength = 13.f; // 130mm → 13cm → в Unreal units (см)
+    float ArmLength = 0.f;
 
     // Максимальна тяга одного мотора в Ньютонах
     UPROPERTY(EditAnywhere, Category = "FPV|Motors")
-    float MaxMotorThrust = 20.f;
+    float MaxMotorThrust = 0.f;
 
     // Коефіцієнт реактивного торку мотора (yaw від різниці CW/CCW)
     UPROPERTY(EditAnywhere, Category = "FPV|Motors")
     float MotorYawTorquePerNewton;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Rates")
-    float MaxPitchRate = 360.f;
+    float MaxPitchRate = 0.f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Rates")
-    float MaxRollRate = 360.f;
+    float MaxRollRate = 0.f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Rates")
-    float MaxYawRate = 180.f;
+    float MaxYawRate = 0.f;
 
     // PID контролери
     UPROPERTY(EditAnywhere, Category = "FPV|PID")
@@ -213,10 +235,10 @@ private:
 
 
     UPROPERTY(EditAnywhere, Category = "FPV|ForwardFlight")
-    float PropwashSpeedScaleMps = 30.f;
+    float PropwashSpeedScaleMps = 22.f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|ForwardFlight")
-    float MinPropEfficiency = 0.85f;
+    float MinPropEfficiency = 0.75f;
 
 
     UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
