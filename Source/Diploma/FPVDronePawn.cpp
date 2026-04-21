@@ -4,8 +4,8 @@
 
 AFPVDronePawn::AFPVDronePawn()
 {
-    ArmLength = 24.f;
-
+    ArmX = 16.67f;
+    ArmY= 14.5f;
     MotorKV = 800.f;
     MotorVoltageLoaded = 23.8f;
     MotorResponseUpRPM = 14.f;
@@ -17,19 +17,19 @@ AFPVDronePawn::AFPVDronePawn()
     MaxRollRate = 360.f;
     MaxYawRate = 360.f;
 
-    PitchPID.P = 0.4f; //0.25f;
+    PitchPID.P = 0.3f;
     PitchPID.I = 0.f;
-    PitchPID.D = 0.002f;
+    PitchPID.D = 0.008f;
     PitchPID.IntegralClamp = 0.3f;
 
-    RollPID.P = 0.4f;
+    RollPID.P = 0.3f;
     RollPID.I = 0.f;
-    RollPID.D = 0.002f;
+    RollPID.D = 0.008f;
     RollPID.IntegralClamp = 0.3f;
 
-    YawPID.P = 2.f;
+    YawPID.P = 1.f;
     YawPID.I = 0.f;
-    YawPID.D = 0.006f;
+    YawPID.D = 0.009f;
     YawPID.IntegralClamp = 0.3f;
 }
 void AFPVDronePawn::BeginPlay()
@@ -41,8 +41,8 @@ void AFPVDronePawn::BeginPlay()
 
     InitMotors(); 
 
-    PlaneMesh->SetLinearDamping(0.f);
-    PlaneMesh->SetAngularDamping(0.2f);
+    //PlaneMesh->SetLinearDamping(0.f);
+    //PlaneMesh->SetAngularDamping(0.2f);
     PlaneMesh->SetMassOverrideInKg(NAME_None, 3.921f, true);
     PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
     PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
@@ -111,16 +111,16 @@ void AFPVDronePawn::InitMotors()
 {
     Motors.SetNum(4);
 
-    Motors[0].LocalPosition = FVector(ArmLength, -ArmLength, 0.f);
+    Motors[0].LocalPosition = FVector(ArmX, -ArmY, 0.f);
     Motors[0].SpinDirection = 1.f;
 
-    Motors[1].LocalPosition = FVector(ArmLength, ArmLength, 0.f);
+    Motors[1].LocalPosition = FVector(ArmX, ArmY, 0.f);
     Motors[1].SpinDirection = -1.f;
 
-    Motors[2].LocalPosition = FVector(-ArmLength, -ArmLength, 0.f);
+    Motors[2].LocalPosition = FVector(-ArmX, -ArmY, 0.f);
     Motors[2].SpinDirection = -1.f;
 
-    Motors[3].LocalPosition = FVector(-ArmLength, ArmLength, 0.f);
+    Motors[3].LocalPosition = FVector(-ArmX, ArmY, 0.f);
     Motors[3].SpinDirection = 1.f;
 
     for (FMotorState& Motor : Motors)
@@ -173,19 +173,74 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
     const float TargetPitchRateNorm = GetPitchInput();
     const float TargetYawRateNorm = GetYawInput();
 
-    const float RollCmd = FMath::Clamp(RollPID.Update(TargetRollRateNorm, CurrentRollRateNorm, DeltaTime), -0.20f, 0.20f);
-    const float PitchCmd = FMath::Clamp(PitchPID.Update(TargetPitchRateNorm, CurrentPitchRateNorm, DeltaTime), -0.20f, 0.20f);
+    const float RollCmd = FMath::Clamp(RollPID.Update(TargetRollRateNorm, CurrentRollRateNorm, DeltaTime), -0.1f, 0.1f);
+    const float PitchCmd = FMath::Clamp(PitchPID.Update(TargetPitchRateNorm, CurrentPitchRateNorm, DeltaTime), -0.1f, 0.1f);
     const float YawCmd = FMath::Clamp(YawPID.Update(TargetYawRateNorm, CurrentYawRateNorm, DeltaTime), -0.2f, 0.2f);
 
-    const float FL = BaseThrottle - PitchCmd - RollCmd - YawCmd * Motors[0].SpinDirection;
-    const float FR = BaseThrottle - PitchCmd + RollCmd - YawCmd * Motors[1].SpinDirection;
-    const float BL = BaseThrottle + PitchCmd - RollCmd - YawCmd * Motors[2].SpinDirection;
-    const float BR = BaseThrottle + PitchCmd + RollCmd - YawCmd * Motors[3].SpinDirection;
+    const float ArmMin = FMath::Min(ArmX, ArmY);
+
+    const float PitchMix = PitchCmd * (ArmMin / FMath::Max(ArmX, 0.001f));
+    const float RollMix = RollCmd * (ArmMin / FMath::Max(ArmY, 0.001f));
+
+    const float FL = BaseThrottle - PitchMix - RollMix - YawCmd * Motors[0].SpinDirection;
+    const float FR = BaseThrottle - PitchMix + RollMix - YawCmd * Motors[1].SpinDirection;
+    const float BL = BaseThrottle + PitchMix - RollMix - YawCmd * Motors[2].SpinDirection;
+    const float BR = BaseThrottle + PitchMix + RollMix - YawCmd * Motors[3].SpinDirection;
 
     Motors[0].Command = FMath::Clamp(FL, 0.f, 1.f);
     Motors[1].Command = FMath::Clamp(FR, 0.f, 1.f);
     Motors[2].Command = FMath::Clamp(BL, 0.f, 1.f);
     Motors[3].Command = FMath::Clamp(BR, 0.f, 1.f);
+
+    /*DebugState.CurrentRollRate = LocalAngVelDeg.X;
+    DebugState.CurrentPitchRate = LocalAngVelDeg.Y;
+    DebugState.CurrentYawRate = LocalAngVelDeg.Z;
+
+    DebugState.TargetRollRate = TargetRollRateNorm * MaxRollRate;
+    DebugState.TargetPitchRate = TargetPitchRateNorm * MaxPitchRate;
+    DebugState.TargetYawRate = TargetYawRateNorm * MaxYawRate;
+
+    DebugState.RollCmd = RollCmd;
+    DebugState.PitchCmd = PitchCmd;
+    DebugState.YawCmd = YawCmd;
+
+    DebugState.FL = FL;
+    DebugState.FR = FR;
+    DebugState.BL = BL;
+    DebugState.BR = BR;
+
+    DebugState.Throttle = BaseThrottle;
+    DebugState.PitchInput = GetPitchInput();
+    DebugState.RollInput = GetRollInput();
+    DebugState.YawInput = GetYawInput();
+
+    DebugLogTimer += DeltaTime;
+
+    if (DebugLogTimer >= 0.15f)
+    {
+        DebugLogTimer = 0.f;
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("CTRL | Thr=%.2f | In P=%.2f R=%.2f Y=%.2f | Rate P=%.1f/%.1f R=%.1f/%.1f Y=%.1f/%.1f | Cmd P=%.3f R=%.3f Y=%.3f | M FL=%.3f FR=%.3f BL=%.3f BR=%.3f"),
+            DebugState.Throttle,
+            DebugState.PitchInput,
+            DebugState.RollInput,
+            DebugState.YawInput,
+            DebugState.CurrentPitchRate,
+            DebugState.TargetPitchRate,
+            DebugState.CurrentRollRate,
+            DebugState.TargetRollRate,
+            DebugState.CurrentYawRate,
+            DebugState.TargetYawRate,
+            DebugState.PitchCmd,
+            DebugState.RollCmd,
+            DebugState.YawCmd,
+            DebugState.FL,
+            DebugState.FR,
+            DebugState.BL,
+            DebugState.BR
+        );
+    }*/
 }
 
 void AFPVDronePawn::ApplyMotorForces()
@@ -367,25 +422,6 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
        //Motor.ReactionTorqueNm = MotorPropTorqueCoeff * Motor.CurrentRPM * Motor.CurrentRPM * Motor.SpinDirection;
         const float OmegaRad = FMath::Max(Motor.CurrentRPM * 2.f * PI / 60.f, MinOmegaRad);
         Motor.ReactionTorqueNm = (Motor.MechanicalPowerWatt / OmegaRad) * Motor.SpinDirection;
-        
-        {
-            static float YawLogTimer = 0.f;
-            YawLogTimer += DeltaTime;
-
-            if (YawLogTimer >= 0.5f)
-            {
-                YawLogTimer = 0.f;
-
-                UE_LOG(LogTemp, Warning,
-                    TEXT("YAW | Thr=%.2f | Cmd=%.3f | RPM=%.0f | MechP=%.1f W | Torque=%.4f Nm"),
-                    Throttle,
-                    Motor.CurrentCommand,
-                    Motor.CurrentRPM,
-                    Motor.MechanicalPowerWatt,
-                    Motor.ReactionTorqueNm
-                );
-            }
-        }
     }
 }
 

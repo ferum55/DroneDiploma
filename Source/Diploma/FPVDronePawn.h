@@ -175,7 +175,7 @@ private:
     float CdForward = 14.f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float CdLateral = 5.f;
+    float CdLateral = 15.f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
     float CdVertical = 2.f;
@@ -204,7 +204,9 @@ private:
 
     // Відстань від центру до мотора по X і Y (половина wheelbase)
     UPROPERTY(EditAnywhere, Category = "FPV|Motors")
-    float ArmLength = 0.f;
+    float ArmX = 0.f;
+    UPROPERTY(EditAnywhere, Category = "FPV|Motors")
+    float ArmY = 0.f;
 
     // Максимальна тяга одного мотора в Ньютонах
     UPROPERTY(EditAnywhere, Category = "FPV|Motors")
