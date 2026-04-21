@@ -17,20 +17,20 @@ AFPVDronePawn::AFPVDronePawn()
     MaxRollRate = 360.f;
     MaxYawRate = 360.f;
 
-    PitchPID.P = 0.8f; //0.25f;
+    PitchPID.P = 0.4f; //0.25f;
     PitchPID.I = 0.f;
-    PitchPID.D = 0.006f;
+    PitchPID.D = 0.002f;
     PitchPID.IntegralClamp = 0.3f;
 
-    RollPID.P = 0.8f;
+    RollPID.P = 0.4f;
     RollPID.I = 0.f;
-    RollPID.D = 0.006f;
+    RollPID.D = 0.002f;
     RollPID.IntegralClamp = 0.3f;
 
-    YawPID.P = 0.8f;
+    YawPID.P = 2.f;
     YawPID.I = 0.f;
-    YawPID.D = 0.002f;
-    YawPID.IntegralClamp = 0.2f;
+    YawPID.D = 0.006f;
+    YawPID.IntegralClamp = 0.3f;
 }
 void AFPVDronePawn::BeginPlay()
 {
@@ -46,6 +46,16 @@ void AFPVDronePawn::BeginPlay()
     PlaneMesh->SetMassOverrideInKg(NAME_None, 3.921f, true);
     PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
     PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+    const FVector InertiaScale(0.059f, 0.059f, 0.113f);
+    PlaneMesh->BodyInstance.InertiaTensorScale = FVector(1.f, 1.f, 0.1f);
+    PlaneMesh->RecreatePhysicsState();
+    PlaneMesh->SetCenterOfMass(FVector(-0.884f, -0.006f, -0.101f));
+
+    const FVector I = PlaneMesh->GetInertiaTensor();
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("New Inertia: X=%.2f Y=%.2f Z=%.2f"),
+        I.X, I.Y, I.Z);
 
     const FVector ComWorld = PlaneMesh->GetCenterOfMass();
     const FVector ComLocal = PlaneMesh->GetComponentTransform().InverseTransformPosition(ComWorld);
@@ -55,6 +65,7 @@ void AFPVDronePawn::BeginPlay()
 
     UE_LOG(LogTemp, Warning, TEXT("Actor Rotation: %s"), *GetActorRotation().ToString());
     UE_LOG(LogTemp, Warning, TEXT("Mesh Rotation: %s"), *PlaneMesh->GetComponentRotation().ToString());
+    
 
     for (int i = 0; i < Motors.Num(); i++)
     {
@@ -164,7 +175,7 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
 
     const float RollCmd = FMath::Clamp(RollPID.Update(TargetRollRateNorm, CurrentRollRateNorm, DeltaTime), -0.20f, 0.20f);
     const float PitchCmd = FMath::Clamp(PitchPID.Update(TargetPitchRateNorm, CurrentPitchRateNorm, DeltaTime), -0.20f, 0.20f);
-    const float YawCmd = FMath::Clamp(YawPID.Update(TargetYawRateNorm, CurrentYawRateNorm, DeltaTime), -0.12f, 0.12f);
+    const float YawCmd = FMath::Clamp(YawPID.Update(TargetYawRateNorm, CurrentYawRateNorm, DeltaTime), -0.2f, 0.2f);
 
     const float FL = BaseThrottle - PitchCmd - RollCmd - YawCmd * Motors[0].SpinDirection;
     const float FR = BaseThrottle - PitchCmd + RollCmd - YawCmd * Motors[1].SpinDirection;
@@ -353,27 +364,25 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
         Motor.ElectricalPowerWatt = EvaluateMotorPowerWattFromCurrent(Motor.CurrentDrawAmp);
         Motor.MechanicalPowerWatt = Motor.ElectricalPowerWatt * MotorMechanicalEfficiency;
 
-        Motor.ReactionTorqueNm = MotorPropTorqueCoeff * Motor.CurrentRPM * Motor.CurrentRPM * Motor.SpinDirection;
+       //Motor.ReactionTorqueNm = MotorPropTorqueCoeff * Motor.CurrentRPM * Motor.CurrentRPM * Motor.SpinDirection;
+        const float OmegaRad = FMath::Max(Motor.CurrentRPM * 2.f * PI / 60.f, MinOmegaRad);
+        Motor.ReactionTorqueNm = (Motor.MechanicalPowerWatt / OmegaRad) * Motor.SpinDirection;
         
         {
-            static float PropLogTimer = 0.f;
-            PropLogTimer += DeltaTime;
+            static float YawLogTimer = 0.f;
+            YawLogTimer += DeltaTime;
 
-            if (PropLogTimer >= 0.5f)
+            if (YawLogTimer >= 0.5f)
             {
-                PropLogTimer = 0.f;
-
-                const float TotalKmh = (WorldVelocityCm.Size() / 100.f) * 3.6f;
+                YawLogTimer = 0.f;
 
                 UE_LOG(LogTemp, Warning,
-                    TEXT("PROP | Thr=%.2f | Cmd=%.3f | I=%.1f A | Speed=%.1f kmh | RPM=%.0f | Thrust=%.2f N | Power=%.0f W"),
+                    TEXT("YAW | Thr=%.2f | Cmd=%.3f | RPM=%.0f | MechP=%.1f W | Torque=%.4f Nm"),
                     Throttle,
                     Motor.CurrentCommand,
-                    Motor.CurrentDrawAmp,
-                    TotalKmh,
                     Motor.CurrentRPM,
-                    Motor.ThrustNewton,
-                    Motor.ElectricalPowerWatt
+                    Motor.MechanicalPowerWatt,
+                    Motor.ReactionTorqueNm
                 );
             }
         }
