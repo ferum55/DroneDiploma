@@ -6,7 +6,7 @@ AFPVDronePawn::AFPVDronePawn()
 {
     ArmX = 16.67f;
     ArmY= 14.5f;
-    MotorKV = 800.f;
+    MotorKV = 900.f;
     MotorVoltageLoaded = 23.8f;
     MotorResponseUpRPM = 14.f;
     MotorResponseDownRPM = 10.f;
@@ -17,19 +17,19 @@ AFPVDronePawn::AFPVDronePawn()
     MaxRollRate = 360.f;
     MaxYawRate = 360.f;
 
-    PitchPID.P = 0.3f;
+    PitchPID.P = 0.25f;
     PitchPID.I = 0.f;
-    PitchPID.D = 0.008f;
+    PitchPID.D = 0.01f;
     PitchPID.IntegralClamp = 0.3f;
 
-    RollPID.P = 0.3f;
+    RollPID.P = 0.25f;
     RollPID.I = 0.f;
-    RollPID.D = 0.008f;
+    RollPID.D = 0.01f;
     RollPID.IntegralClamp = 0.3f;
 
     YawPID.P = 1.f;
     YawPID.I = 0.f;
-    YawPID.D = 0.009f;
+    YawPID.D = 0.075f;
     YawPID.IntegralClamp = 0.3f;
 }
 void AFPVDronePawn::BeginPlay()
@@ -46,7 +46,6 @@ void AFPVDronePawn::BeginPlay()
     PlaneMesh->SetMassOverrideInKg(NAME_None, 3.921f, true);
     PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
     PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
-    const FVector InertiaScale(0.059f, 0.059f, 0.113f);
     PlaneMesh->BodyInstance.InertiaTensorScale = FVector(1.f, 1.f, 0.1f);
     PlaneMesh->RecreatePhysicsState();
     PlaneMesh->SetCenterOfMass(FVector(-0.884f, -0.006f, -0.101f));
@@ -138,7 +137,7 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
 
     const float BaseThrottle = FMath::Clamp(Throttle, 0.f, 1.f);
 
-    /*if (BaseThrottle < 0.02f)
+    if (BaseThrottle < 0.02f)
     {
         PitchPID.Reset();
         RollPID.Reset();
@@ -150,7 +149,7 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
         }
 
         return;
-    }*/
+    }
 
     const FTransform MeshTransform = Mesh->GetComponentTransform();
     const FVector WorldAngVelDeg = Mesh->GetPhysicsAngularVelocityInDegrees();
@@ -164,9 +163,9 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
     const float TargetPitchRateNorm = GetPitchInput();
     const float TargetYawRateNorm = GetYawInput();
 
-    const float RollCmd = FMath::Clamp(RollPID.Update(TargetRollRateNorm, CurrentRollRateNorm, DeltaTime), -0.1f, 0.1f);
-    const float PitchCmd = FMath::Clamp(PitchPID.Update(TargetPitchRateNorm, CurrentPitchRateNorm, DeltaTime), -0.1f, 0.1f);
-    const float YawCmd = FMath::Clamp(YawPID.Update(TargetYawRateNorm, CurrentYawRateNorm, DeltaTime), -0.2f, 0.2f);
+    const float RollCmd = FMath::Clamp(RollPID.Update(TargetRollRateNorm, CurrentRollRateNorm, DeltaTime), -0.05f, 0.05f);
+    const float PitchCmd = FMath::Clamp(PitchPID.Update(TargetPitchRateNorm, CurrentPitchRateNorm, DeltaTime), -0.05f, 0.05f);
+    const float YawCmd = FMath::Clamp(YawPID.Update(TargetYawRateNorm, CurrentYawRateNorm, DeltaTime), -0.1f, 0.1f);
 
     const float ArmMin = FMath::Min(ArmX, ArmY);
 
@@ -183,7 +182,7 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
     Motors[2].Command = FMath::Clamp(BL, 0.f, 1.f);
     Motors[3].Command = FMath::Clamp(BR, 0.f, 1.f);
 
-    /*DebugState.CurrentRollRate = LocalAngVelDeg.X;
+    DebugState.CurrentRollRate = LocalAngVelDeg.X;
     DebugState.CurrentPitchRate = LocalAngVelDeg.Y;
     DebugState.CurrentYawRate = LocalAngVelDeg.Z;
 
@@ -211,7 +210,7 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
     {
         DebugLogTimer = 0.f;
 
-        UE_LOG(LogTemp, Warning,
+        /*UE_LOG(LogTemp, Warning,
             TEXT("CTRL | Thr=%.2f | In P=%.2f R=%.2f Y=%.2f | Rate P=%.1f/%.1f R=%.1f/%.1f Y=%.1f/%.1f | Cmd P=%.3f R=%.3f Y=%.3f | M FL=%.3f FR=%.3f BL=%.3f BR=%.3f"),
             DebugState.Throttle,
             DebugState.PitchInput,
@@ -230,8 +229,8 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
             DebugState.FR,
             DebugState.BL,
             DebugState.BR
-        );
-    }*/
+        );*/
+    }
 }
 
 void AFPVDronePawn::ApplyMotorForces()
@@ -389,31 +388,190 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
         return;
     }
 
+    static const TArray<float> ThrottlePts = { 0.f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f };
+    static const TArray<float> RpmFromThrottlePts = { 0.f, 9097.f, 10518.f, 11816.f, 12897.f, 13765.f, 14404.f };
+
+    static const TArray<float> RpmPts = { 9097.f, 10518.f, 11816.f, 12897.f, 13765.f, 14404.f };
+    static const TArray<float> VoltPts = { 25.31f, 25.24f, 25.15f, 25.04f, 24.92f, 24.81f };
+    static const TArray<float> PowerPts = { 312.7f, 497.7f, 734.3f, 1016.3f, 1316.8f, 1606.2f };
+    static const TArray<float> ThrustPts = { 1491.f, 2039.f, 2609.f, 3207.f, 3681.f, 4014.f };
+
+    const float LowerThrustExponent = 2.156574f;
+    const float LowerPowerExponent = 3.202028f;
+
+    auto InterpCurve = [](const TArray<float>& X, const TArray<float>& Y, float Value) -> float
+        {
+            if (X.Num() == 0 || Y.Num() == 0 || X.Num() != Y.Num())
+            {
+                return 0.f;
+            }
+
+            if (Value <= X[0])
+            {
+                return Y[0];
+            }
+
+            const int32 Last = X.Num() - 1;
+            if (Value >= X[Last])
+            {
+                return Y[Last];
+            }
+
+            for (int32 i = 0; i < Last; ++i)
+            {
+                if (Value >= X[i] && Value <= X[i + 1])
+                {
+                    const float Alpha = (Value - X[i]) / (X[i + 1] - X[i]);
+                    return FMath::Lerp(Y[i], Y[i + 1], Alpha);
+                }
+            }
+
+            return Y[Last];
+        };
+
+    auto EvaluateTargetRPMFromCommand = [&](float Command) -> float
+        {
+            const float C = FMath::Clamp(Command, 0.f, 1.f);
+            return InterpCurve(ThrottlePts, RpmFromThrottlePts, C);
+        };
+
+    auto EvaluateVoltageFromRPM = [&](float RPM) -> float
+        {
+            if (RPM <= 0.f)
+            {
+                return 25.31f;
+            }
+
+            if (RPM < RpmPts[0])
+            {
+                return VoltPts[0];
+            }
+
+            return InterpCurve(RpmPts, VoltPts, RPM);
+        };
+
+    auto EvaluatePowerFromRPM = [&](float RPM) -> float
+        {
+            if (RPM <= 0.f)
+            {
+                return 0.f;
+            }
+
+            if (RPM < RpmPts[0])
+            {
+                const float Ratio = RPM / RpmPts[0];
+                return PowerPts[0] * FMath::Pow(Ratio, LowerPowerExponent);
+            }
+
+            return InterpCurve(RpmPts, PowerPts, RPM);
+        };
+
+    auto EvaluateThrustFromRPM = [&](float RPM) -> float
+        {
+            if (RPM <= 0.f)
+            {
+                return 0.f;
+            }
+
+            if (RPM < RpmPts[0])
+            {
+                const float Ratio = RPM / RpmPts[0];
+                return ThrustPts[0] * FMath::Pow(Ratio, LowerThrustExponent);
+            }
+
+            return InterpCurve(RpmPts, ThrustPts, RPM);
+        };
+
     const FTransform MeshTransform = Mesh->GetComponentTransform();
     const FVector WorldVelocityCm = Mesh->GetPhysicsLinearVelocity();
     const FVector LocalVelocityMps = MeshTransform.InverseTransformVectorNoScale(WorldVelocityCm) / 100.f;
     const float PropEfficiencyFactor = ComputePropEfficiencyFactor(LocalVelocityMps);
 
-    for (FMotorState& Motor : Motors)
-    {
-        const float ResponseSpeed = (Motor.Command > Motor.CurrentCommand) ? MotorResponseUpRPM : MotorResponseDownRPM;
-        Motor.CurrentCommand = FMath::FInterpTo(Motor.CurrentCommand, Motor.Command, DeltaTime, ResponseSpeed);
+    float TotalThrustN = 0.f;
+    float TotalElectricalPowerW = 0.f;
+    float TotalCurrentA = 0.f;
+    float TotalReactionTorqueNm = 0.f;
+    float AvgRPM = 0.f;
 
-        Motor.TargetRPM = Motor.CurrentCommand * MotorKV * MotorVoltageLoaded;
+    for (int32 i = 0; i < Motors.Num(); ++i)
+    {
+        FMotorState& Motor = Motors[i];
+
+        const float ResponseSpeed = (Motor.Command > Motor.CurrentCommand) ? MotorResponseUpRPM : MotorResponseDownRPM;
+
+        Motor.TargetRPM = EvaluateTargetRPMFromCommand(Motor.Command);
+
+        //const float ResponseSpeed = (Motor.TargetRPM > Motor.CurrentRPM)
+        //    ? MotorResponseUpRPM
+        //    : MotorResponseDownRPM;
+
+        Motor.CurrentCommand = Motor.Command;
         Motor.CurrentRPM = FMath::FInterpTo(Motor.CurrentRPM, Motor.TargetRPM, DeltaTime, ResponseSpeed);
 
-        Motor.CurrentDrawAmp = EvaluateMotorCurrentAmp(Motor.CurrentCommand);
+        const float Voltage = EvaluateVoltageFromRPM(Motor.CurrentRPM);
+        const float ElectricalPower = EvaluatePowerFromRPM(Motor.CurrentRPM);
+        const float ThrustGrams = EvaluateThrustFromRPM(Motor.CurrentRPM);
 
-        const float ThrustGrams = EvaluateMotorThrustGramsFromCurrent(Motor.CurrentDrawAmp);
+        Motor.ElectricalPowerWatt = ElectricalPower;
+        Motor.CurrentDrawAmp = Voltage > KINDA_SMALL_NUMBER ? ElectricalPower / Voltage : 0.f;
         Motor.ThrustNewton = ThrustGrams * 0.001f * 9.81f * PropEfficiencyFactor;
-
-        Motor.ElectricalPowerWatt = EvaluateMotorPowerWattFromCurrent(Motor.CurrentDrawAmp);
         Motor.MechanicalPowerWatt = Motor.ElectricalPowerWatt * MotorMechanicalEfficiency;
 
-       //Motor.ReactionTorqueNm = MotorPropTorqueCoeff * Motor.CurrentRPM * Motor.CurrentRPM * Motor.SpinDirection;
         const float OmegaRad = FMath::Max(Motor.CurrentRPM * 2.f * PI / 60.f, MinOmegaRad);
         Motor.ReactionTorqueNm = (Motor.MechanicalPowerWatt / OmegaRad) * Motor.SpinDirection;
+        const float KtNmPerAmp = 60.f / (2.f * PI * MotorKV);
+        const float TorqueFromBusCurrent = KtNmPerAmp * Motor.CurrentDrawAmp;
+        const float TorqueFromPower = Motor.MechanicalPowerWatt / OmegaRad;
+        UE_LOG(LogTemp, Warning,
+            TEXT("TORQUE | I=%.2fA | KtI=%.4fNm | P/omega=%.4fNm"),
+            Motor.CurrentDrawAmp,
+            TorqueFromBusCurrent,
+            TorqueFromPower
+        );
+
+        TotalThrustN += Motor.ThrustNewton;
+        TotalElectricalPowerW += Motor.ElectricalPowerWatt;
+        TotalCurrentA += Motor.CurrentDrawAmp;
+        TotalReactionTorqueNm += Motor.ReactionTorqueNm;
+        AvgRPM += Motor.CurrentRPM;
+    }
+
+    AvgRPM = Motors.Num() > 0 ? AvgRPM / Motors.Num() : 0.f;
+
+    static float MotorLogTimer = 0.f;
+    MotorLogTimer += DeltaTime;
+
+    if (MotorLogTimer >= 0.12f)
+    {
+        MotorLogTimer = 0.f;
+
+        const float WeightN = 3.921f * 9.81f;
+
+        /*UE_LOG(LogTemp, Warning,
+            TEXT("MOTOR | Vel X=%.2f Y=%.2f Z=%.2f | Eff=%.3f | AvgRPM=%.0f | TotalThrust=%.2fN | Weight=%.2fN | TotalP=%.1fW | TotalI=%.2fA | YawTorque=%.4fNm"),
+            LocalVelocityMps.X,
+            LocalVelocityMps.Y,
+            LocalVelocityMps.Z,
+            PropEfficiencyFactor,
+            AvgRPM,
+            TotalThrustN,
+            WeightN,
+            TotalElectricalPowerW,
+            TotalCurrentA,
+            TotalReactionTorqueNm
+        );
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("M0 C=%.3f CC=%.3f RPM=%.0f/%.0f T=%.2fN I=%.2fA P=%.1fW | M1 C=%.3f CC=%.3f RPM=%.0f/%.0f T=%.2fN I=%.2fA P=%.1fW"),
+            Motors[0].Command, Motors[0].CurrentCommand, Motors[0].CurrentRPM, Motors[0].TargetRPM, Motors[0].ThrustNewton, Motors[0].CurrentDrawAmp, Motors[0].ElectricalPowerWatt,
+            Motors[1].Command, Motors[1].CurrentCommand, Motors[1].CurrentRPM, Motors[1].TargetRPM, Motors[1].ThrustNewton, Motors[1].CurrentDrawAmp, Motors[1].ElectricalPowerWatt
+        );
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("M2 C=%.3f CC=%.3f RPM=%.0f/%.0f T=%.2fN I=%.2fA P=%.1fW | M3 C=%.3f CC=%.3f RPM=%.0f/%.0f T=%.2fN I=%.2fA P=%.1fW"),
+            Motors[2].Command, Motors[2].CurrentCommand, Motors[2].CurrentRPM, Motors[2].TargetRPM, Motors[2].ThrustNewton, Motors[2].CurrentDrawAmp, Motors[2].ElectricalPowerWatt,
+            Motors[3].Command, Motors[3].CurrentCommand, Motors[3].CurrentRPM, Motors[3].TargetRPM, Motors[3].ThrustNewton, Motors[3].CurrentDrawAmp, Motors[3].ElectricalPowerWatt
+        );*/
     }
 }
-
 
