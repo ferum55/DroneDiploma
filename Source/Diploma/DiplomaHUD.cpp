@@ -41,7 +41,7 @@ void ADiplomaHUD::DrawHUD()
 		return;
 	}
 
-	const float CX = Canvas->ClipX * 0.5f;
+	/*const float CX = Canvas->ClipX * 0.5f;
 	const float CY = Canvas->ClipY * 0.5f;
 
 	const float H = Canvas->ClipY;
@@ -53,11 +53,7 @@ void ADiplomaHUD::DrawHUD()
 	DrawLine(CX - Half, CY - Half + C, CX - Half, CY + Half - C, FLinearColor::White, LineThickness);
 	DrawLine(CX + Half, CY - Half + C, CX + Half, CY + Half - C, FLinearColor::White, LineThickness);
 
-	ADiplomaPawn* Pawn = Cast<ADiplomaPawn>(GetOwningPawn());
-	if (!Pawn)
-	{
-		return;
-	}
+	
 
 	const float DotX = CX + FMath::Clamp(Pawn->GetRollInput(), -1.f, 1.f) * Half;
 	const float DotY = CY + FMath::Clamp(Pawn->GetPitchInput(), -1.f, 1.f) * Half;
@@ -68,7 +64,13 @@ void ADiplomaHUD::DrawHUD()
 		DotY - DotSize * 0.5f,
 		DotSize,
 		DotSize
-	);
+	);*/
+
+	ADiplomaPawn* Pawn = Cast<ADiplomaPawn>(GetOwningPawn());
+	if (!Pawn)
+	{
+		return;
+	}
 
 	if (TelemetryWidget)
 	{

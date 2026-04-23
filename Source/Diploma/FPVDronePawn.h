@@ -100,9 +100,15 @@ public:
     virtual void Tick(float DeltaSeconds) override;
     virtual void BeginPlay() override;
 
+    //BatteryTelemetry
+    float GetBatteryLoadedVoltage() const { return BatteryLoadedVoltage; }
+    float GetBatteryConsumedAh() const { return BatteryConsumedAh; }
+    float GetBatteryTotalCurrentA() const { return BatteryTotalCurrentA; }
+
 protected:
     virtual void ApplyThrust() override;
     virtual void ApplyTorques() override;
+    virtual void UpdateTelemetry() override;
 
 private:
 
@@ -284,6 +290,15 @@ private:
 
     UPROPERTY(EditAnywhere, Category = "FPV|Battery")
     bool bBatteryCutoffActive = false;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Telemetry")
+    float VideoLinkPercentValue = 100.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Telemetry")
+    float TxPowerWValue = 2.5f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Payload")
+    bool bBombArmed = false;
 
     float EvaluateMotorCurrentAmp(float Command) const;
     float EvaluateMotorThrustGramsFromCurrent(float CurrentAmp) const;

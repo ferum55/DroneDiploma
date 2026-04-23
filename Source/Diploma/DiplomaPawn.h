@@ -45,6 +45,54 @@ struct FDroneTelemetry
 
 	UPROPERTY(BlueprintReadOnly)
 	float YawDeg = 0.f;
+
+	UPROPERTY(BlueprintReadOnly)
+	float HeadingDeg = 0.f;
+
+	UPROPERTY(BlueprintReadOnly)
+	float FlightTimeSeconds = 0.f;
+
+	UPROPERTY(BlueprintReadOnly)
+	bool bArmed = true;
+
+	UPROPERTY(BlueprintReadOnly)
+	FString FlightMode;
+
+	UPROPERTY(BlueprintReadOnly)
+	float PackVoltage = 0.f;
+
+	UPROPERTY(BlueprintReadOnly)
+	float CellVoltage = 0.f;
+
+	UPROPERTY(BlueprintReadOnly)
+	float ConsumedMah = 0.f;
+
+	UPROPERTY(BlueprintReadOnly)
+	float CurrentAmp = 0.f;
+
+	UPROPERTY(BlueprintReadOnly)
+	bool bBatteryValid = false;
+
+	UPROPERTY(BlueprintReadOnly)
+	float PrimaryLinkPercent = 0.f;
+
+	UPROPERTY(BlueprintReadOnly)
+	bool bPrimaryLinkValid = false;
+
+	UPROPERTY(BlueprintReadOnly)
+	float VideoLinkPercent = 0.f;
+
+	UPROPERTY(BlueprintReadOnly)
+	bool bVideoLinkValid = false;
+
+	UPROPERTY(BlueprintReadOnly)
+	float TxPowerW = 0.f;
+
+	UPROPERTY(BlueprintReadOnly)
+	bool bTxPowerValid = false;
+
+	UPROPERTY(BlueprintReadOnly)
+	bool bBombArmed = false;
 };
 
 UCLASS(Config=Game)
@@ -96,7 +144,7 @@ protected:
 	virtual void ApplyThrust();
 	virtual void ApplyTorques();
 
-
+	float TelemetryStartTimeSeconds = 0.f;
 	float Throttle;
 	float PitchInput;
 	float RollInput;
@@ -166,5 +214,5 @@ public:
 	void UpdateMouseJoystick();
 	void ToggleMouseJoystick();
 	void CenterMouseCursor();
-	void UpdateTelemetry();
+	virtual void UpdateTelemetry();
 };

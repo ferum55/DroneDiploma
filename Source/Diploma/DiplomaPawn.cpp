@@ -77,6 +77,7 @@ void ADiplomaPawn::BeginPlay()
 {
 	Super::BeginPlay();
 	BaroZeroZ = GetActorLocation().Z;
+	TelemetryStartTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
 	PlaneMesh->SetCenterOfMass(FVector::ZeroVector, NAME_None);
 
 	SpawnLocation = GetActorLocation();
@@ -140,7 +141,7 @@ void ADiplomaPawn::Tick(float DeltaSeconds)
 		return;
 	}
 	UpdateMouseJoystick();
-	UpdateTelemetry();
+	/*UpdateTelemetry();*/
 	float RawThrottle = GetInputAxisValue(TEXT("TestAxis4"));
 	float RawPitch = GetInputAxisValue(TEXT("TestAxis5"));
 	float RawRoll = GetInputAxisValue(TEXT("TestAxis3"));
@@ -364,9 +365,13 @@ void ADiplomaPawn::CenterMouseCursor()
 
 void ADiplomaPawn::UpdateTelemetry()
 {
-	if (!PlaneMesh) return;
+	if (!PlaneMesh)
+	{
+		return;
+	}
 
 	const FVector Velocity = PlaneMesh->GetPhysicsLinearVelocity();
+
 	Telemetry.Throttle01 = Throttle;
 	Telemetry.ThrottlePercent = Throttle * 100.f;
 	Telemetry.SpeedMps = Velocity.Size() / 100.f;
@@ -383,8 +388,31 @@ void ADiplomaPawn::UpdateTelemetry()
 	Telemetry.PitchDeg = R.Pitch;
 	Telemetry.RollDeg = R.Roll;
 	Telemetry.YawDeg = R.Yaw;
+	Telemetry.HeadingDeg = FRotator::ClampAxis(R.Yaw);
 
+	Telemetry.FlightTimeSeconds = GetWorld()
+		? (GetWorld()->GetTimeSeconds() - TelemetryStartTimeSeconds)
+		: 0.f;
 
+	Telemetry.bArmed = true;
+	Telemetry.FlightMode = TEXT("");
+
+	Telemetry.PackVoltage = 0.f;
+	Telemetry.CellVoltage = 0.f;
+	Telemetry.ConsumedMah = 0.f;
+	Telemetry.CurrentAmp = 0.f;
+	Telemetry.bBatteryValid = false;
+
+	Telemetry.PrimaryLinkPercent = 0.f;
+	Telemetry.bPrimaryLinkValid = false;
+
+	Telemetry.VideoLinkPercent = 0.f;
+	Telemetry.bVideoLinkValid = false;
+
+	Telemetry.TxPowerW = 0.f;
+	Telemetry.bTxPowerValid = false;
+
+	Telemetry.bBombArmed = false;
 }
 
 float ADiplomaPawn::GetRadioAltitudeMeters(bool& bValid) const

@@ -101,6 +101,9 @@ void AFPVDronePawn::Tick(float DeltaSeconds)
     UpdateMotorThrusts(DeltaSeconds);
     UpdateMotorDynamics(DeltaSeconds);
     ApplyThrust();
+
+
+    UpdateTelemetry();
 }
 
 void AFPVDronePawn::ApplyTorques()
@@ -676,5 +679,29 @@ float AFPVDronePawn::EvaluateBatteryOutputScaleFromCellVoltage(float CellLoadedV
         0.f,
         1.f
     );
+}
+
+void AFPVDronePawn::UpdateTelemetry()
+{
+    Super::UpdateTelemetry();
+
+    Telemetry.FlightMode = TEXT("ACRO");
+
+    Telemetry.PackVoltage = BatteryLoadedVoltage;
+    Telemetry.CellVoltage = BatterySeriesCells > 0 ? BatteryLoadedVoltage / BatterySeriesCells : 0.f;
+    Telemetry.ConsumedMah = BatteryConsumedAh * 1000.f;
+    Telemetry.CurrentAmp = BatteryTotalCurrentA;
+    Telemetry.bBatteryValid = true;
+
+    Telemetry.PrimaryLinkPercent = 0.f;
+    Telemetry.bPrimaryLinkValid = false;
+
+    Telemetry.VideoLinkPercent = VideoLinkPercentValue;
+    Telemetry.bVideoLinkValid = true;
+
+    Telemetry.TxPowerW = TxPowerWValue;
+    Telemetry.bTxPowerValid = true;
+
+    Telemetry.bBombArmed = bBombArmed;
 }
 
