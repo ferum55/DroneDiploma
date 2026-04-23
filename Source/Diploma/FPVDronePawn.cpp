@@ -31,6 +31,17 @@ AFPVDronePawn::AFPVDronePawn()
     YawPID.I = 0.f;
     YawPID.D = 0.075f;
     YawPID.IntegralClamp = 0.3f;
+
+    BatterySeriesCells = 6;
+    BatteryParallelCells = 3;
+    BatteryCellCapacityAh = 5.0f;
+    BatteryCellInternalResistanceOhm = 0.012f;
+    BatteryCellVoltageFull = 4.2f;
+    BatteryCellVoltageNominal = 3.6f;
+    BatteryCellVoltageEmpty = 3.0f;
+    BatteryUsableFraction = 0.85f;
+    BatteryBenchReferenceVoltage = 25.2f;
+    BatteryPackMassKg = 1.28f;
 }
 void AFPVDronePawn::BeginPlay()
 {
@@ -38,7 +49,7 @@ void AFPVDronePawn::BeginPlay()
     PitchPID.Reset();
     RollPID.Reset();
     YawPID.Reset();
-
+    ResetBatteryState();
     InitMotors(); 
 
     //PlaneMesh->SetLinearDamping(0.f);
@@ -210,7 +221,8 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
     {
         DebugLogTimer = 0.f;
 
-        /*UE_LOG(LogTemp, Warning,
+        /*
+        (LogTemp, Warning,
             TEXT("CTRL | Thr=%.2f | In P=%.2f R=%.2f Y=%.2f | Rate P=%.1f/%.1f R=%.1f/%.1f Y=%.1f/%.1f | Cmd P=%.3f R=%.3f Y=%.3f | M FL=%.3f FR=%.3f BL=%.3f BR=%.3f"),
             DebugState.Throttle,
             DebugState.PitchInput,
@@ -392,7 +404,6 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
     static const TArray<float> RpmFromThrottlePts = { 0.f, 9097.f, 10518.f, 11816.f, 12897.f, 13765.f, 14404.f };
 
     static const TArray<float> RpmPts = { 9097.f, 10518.f, 11816.f, 12897.f, 13765.f, 14404.f };
-    static const TArray<float> VoltPts = { 25.31f, 25.24f, 25.15f, 25.04f, 24.92f, 24.81f };
     static const TArray<float> PowerPts = { 312.7f, 497.7f, 734.3f, 1016.3f, 1316.8f, 1606.2f };
     static const TArray<float> ThrustPts = { 1491.f, 2039.f, 2609.f, 3207.f, 3681.f, 4014.f };
 
@@ -432,22 +443,9 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
     auto EvaluateTargetRPMFromCommand = [&](float Command) -> float
         {
             const float C = FMath::Clamp(Command, 0.f, 1.f);
-            return InterpCurve(ThrottlePts, RpmFromThrottlePts, C);
-        };
-
-    auto EvaluateVoltageFromRPM = [&](float RPM) -> float
-        {
-            if (RPM <= 0.f)
-            {
-                return 25.31f;
-            }
-
-            if (RPM < RpmPts[0])
-            {
-                return VoltPts[0];
-            }
-
-            return InterpCurve(RpmPts, VoltPts, RPM);
+            const float BaseRPM = InterpCurve(ThrottlePts, RpmFromThrottlePts, C);
+            const float VoltageScale = BatteryLoadedVoltage / FMath::Max(BatteryBenchReferenceVoltage, KINDA_SMALL_NUMBER);
+            return BaseRPM * VoltageScale * BatteryOutputScale;
         };
 
     auto EvaluatePowerFromRPM = [&](float RPM) -> float
@@ -487,91 +485,196 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
     const FVector LocalVelocityMps = MeshTransform.InverseTransformVectorNoScale(WorldVelocityCm) / 100.f;
     const float PropEfficiencyFactor = ComputePropEfficiencyFactor(LocalVelocityMps);
 
+    float TotalCurrentA = 0.f;
+
     float TotalThrustN = 0.f;
     float TotalElectricalPowerW = 0.f;
-    float TotalCurrentA = 0.f;
-    float TotalReactionTorqueNm = 0.f;
     float AvgRPM = 0.f;
 
     for (int32 i = 0; i < Motors.Num(); ++i)
     {
         FMotorState& Motor = Motors[i];
 
-        const float ResponseSpeed = (Motor.Command > Motor.CurrentCommand) ? MotorResponseUpRPM : MotorResponseDownRPM;
-
         Motor.TargetRPM = EvaluateTargetRPMFromCommand(Motor.Command);
 
-        //const float ResponseSpeed = (Motor.TargetRPM > Motor.CurrentRPM)
-        //    ? MotorResponseUpRPM
-        //    : MotorResponseDownRPM;
+        const float ResponseSpeed = (Motor.TargetRPM > Motor.CurrentRPM)
+            ? MotorResponseUpRPM
+            : MotorResponseDownRPM;
 
         Motor.CurrentCommand = Motor.Command;
         Motor.CurrentRPM = FMath::FInterpTo(Motor.CurrentRPM, Motor.TargetRPM, DeltaTime, ResponseSpeed);
 
-        const float Voltage = EvaluateVoltageFromRPM(Motor.CurrentRPM);
+        if (Motor.CurrentRPM < 1.f)
+        {
+            Motor.CurrentRPM = 0.f;
+        }
+
         const float ElectricalPower = EvaluatePowerFromRPM(Motor.CurrentRPM);
         const float ThrustGrams = EvaluateThrustFromRPM(Motor.CurrentRPM);
 
         Motor.ElectricalPowerWatt = ElectricalPower;
-        Motor.CurrentDrawAmp = Voltage > KINDA_SMALL_NUMBER ? ElectricalPower / Voltage : 0.f;
+        Motor.CurrentDrawAmp = BatteryLoadedVoltage > KINDA_SMALL_NUMBER ? ElectricalPower / BatteryLoadedVoltage : 0.f;
         Motor.ThrustNewton = ThrustGrams * 0.001f * 9.81f * PropEfficiencyFactor;
         Motor.MechanicalPowerWatt = Motor.ElectricalPowerWatt * MotorMechanicalEfficiency;
 
         const float OmegaRad = FMath::Max(Motor.CurrentRPM * 2.f * PI / 60.f, MinOmegaRad);
         Motor.ReactionTorqueNm = (Motor.MechanicalPowerWatt / OmegaRad) * Motor.SpinDirection;
-        const float KtNmPerAmp = 60.f / (2.f * PI * MotorKV);
-        const float TorqueFromBusCurrent = KtNmPerAmp * Motor.CurrentDrawAmp;
-        const float TorqueFromPower = Motor.MechanicalPowerWatt / OmegaRad;
-        UE_LOG(LogTemp, Warning,
-            TEXT("TORQUE | I=%.2fA | KtI=%.4fNm | P/omega=%.4fNm"),
-            Motor.CurrentDrawAmp,
-            TorqueFromBusCurrent,
-            TorqueFromPower
-        );
 
+        TotalCurrentA += Motor.CurrentDrawAmp;
         TotalThrustN += Motor.ThrustNewton;
         TotalElectricalPowerW += Motor.ElectricalPowerWatt;
-        TotalCurrentA += Motor.CurrentDrawAmp;
-        TotalReactionTorqueNm += Motor.ReactionTorqueNm;
         AvgRPM += Motor.CurrentRPM;
     }
-
     AvgRPM = Motors.Num() > 0 ? AvgRPM / Motors.Num() : 0.f;
+    UpdateBatteryState(TotalCurrentA, DeltaTime);
 
     static float MotorLogTimer = 0.f;
     MotorLogTimer += DeltaTime;
 
-    if (MotorLogTimer >= 0.12f)
+    if (MotorLogTimer >= 0.25f)
     {
         MotorLogTimer = 0.f;
 
         const float WeightN = 3.921f * 9.81f;
 
-        /*UE_LOG(LogTemp, Warning,
-            TEXT("MOTOR | Vel X=%.2f Y=%.2f Z=%.2f | Eff=%.3f | AvgRPM=%.0f | TotalThrust=%.2fN | Weight=%.2fN | TotalP=%.1fW | TotalI=%.2fA | YawTorque=%.4fNm"),
-            LocalVelocityMps.X,
-            LocalVelocityMps.Y,
-            LocalVelocityMps.Z,
-            PropEfficiencyFactor,
+        UE_LOG(LogTemp, Warning,
+            TEXT("MOTOR | AvgRPM=%.0f | Thrust=%.2fN | Weight=%.2fN | Power=%.1fW | Current=%.2fA | Vbat=%.2fV"),
             AvgRPM,
             TotalThrustN,
             WeightN,
             TotalElectricalPowerW,
             TotalCurrentA,
-            TotalReactionTorqueNm
+            BatteryLoadedVoltage
         );
 
         UE_LOG(LogTemp, Warning,
-            TEXT("M0 C=%.3f CC=%.3f RPM=%.0f/%.0f T=%.2fN I=%.2fA P=%.1fW | M1 C=%.3f CC=%.3f RPM=%.0f/%.0f T=%.2fN I=%.2fA P=%.1fW"),
-            Motors[0].Command, Motors[0].CurrentCommand, Motors[0].CurrentRPM, Motors[0].TargetRPM, Motors[0].ThrustNewton, Motors[0].CurrentDrawAmp, Motors[0].ElectricalPowerWatt,
-            Motors[1].Command, Motors[1].CurrentCommand, Motors[1].CurrentRPM, Motors[1].TargetRPM, Motors[1].ThrustNewton, Motors[1].CurrentDrawAmp, Motors[1].ElectricalPowerWatt
+            TEXT("M0 C=%.3f RPM=%.0f T=%.2fN I=%.2fA | M1 C=%.3f RPM=%.0f T=%.2fN I=%.2fA"),
+            Motors[0].Command, Motors[0].CurrentRPM, Motors[0].ThrustNewton, Motors[0].CurrentDrawAmp,
+            Motors[1].Command, Motors[1].CurrentRPM, Motors[1].ThrustNewton, Motors[1].CurrentDrawAmp
         );
 
         UE_LOG(LogTemp, Warning,
-            TEXT("M2 C=%.3f CC=%.3f RPM=%.0f/%.0f T=%.2fN I=%.2fA P=%.1fW | M3 C=%.3f CC=%.3f RPM=%.0f/%.0f T=%.2fN I=%.2fA P=%.1fW"),
-            Motors[2].Command, Motors[2].CurrentCommand, Motors[2].CurrentRPM, Motors[2].TargetRPM, Motors[2].ThrustNewton, Motors[2].CurrentDrawAmp, Motors[2].ElectricalPowerWatt,
-            Motors[3].Command, Motors[3].CurrentCommand, Motors[3].CurrentRPM, Motors[3].TargetRPM, Motors[3].ThrustNewton, Motors[3].CurrentDrawAmp, Motors[3].ElectricalPowerWatt
-        );*/
+            TEXT("M2 C=%.3f RPM=%.0f T=%.2fN I=%.2fA | M3 C=%.3f RPM=%.0f T=%.2fN I=%.2fA"),
+            Motors[2].Command, Motors[2].CurrentRPM, Motors[2].ThrustNewton, Motors[2].CurrentDrawAmp,
+            Motors[3].Command, Motors[3].CurrentRPM, Motors[3].ThrustNewton, Motors[3].CurrentDrawAmp
+        );
     }
+}
+
+float AFPVDronePawn::GetBatteryCapacityAh() const
+{
+    return BatteryParallelCells * BatteryCellCapacityAh;
+}
+
+float AFPVDronePawn::GetBatteryUsableCapacityAh() const
+{
+    return GetBatteryCapacityAh() * BatteryUsableFraction;
+}
+
+float AFPVDronePawn::GetBatteryInternalResistanceOhm() const
+{
+    return BatterySeriesCells * (BatteryCellInternalResistanceOhm / FMath::Max(BatteryParallelCells, 1));
+}
+
+float AFPVDronePawn::EvaluateCellOCVFromSoC(float SoC) const
+{
+    static const TArray<float> SocPts = { 0.0f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f };
+    static const TArray<float> VoltPts = { 3.00f, 3.40f, 3.55f, 3.65f, 3.70f, 3.75f, 3.80f, 3.87f, 3.95f, 4.08f, 4.20f };
+
+    const float S = FMath::Clamp(SoC, 0.f, 1.f);
+
+    if (S <= SocPts[0])
+    {
+        return VoltPts[0];
+    }
+
+    const int32 Last = SocPts.Num() - 1;
+    if (S >= SocPts[Last])
+    {
+        return VoltPts[Last];
+    }
+
+    for (int32 i = 0; i < Last; ++i)
+    {
+        if (S >= SocPts[i] && S <= SocPts[i + 1])
+        {
+            const float Alpha = (S - SocPts[i]) / (SocPts[i + 1] - SocPts[i]);
+            return FMath::Lerp(VoltPts[i], VoltPts[i + 1], Alpha);
+        }
+    }
+
+    return VoltPts[Last];
+}
+
+void AFPVDronePawn::ResetBatteryState()
+{
+    BatteryConsumedAh = 0.f;
+    BatterySoC = 1.f;
+    BatteryOpenCircuitVoltage = BatterySeriesCells * BatteryCellVoltageFull;
+    BatteryLoadedVoltage = BatteryOpenCircuitVoltage;
+    BatteryTotalCurrentA = 0.f;
+}
+
+void AFPVDronePawn::UpdateBatteryState(float TotalCurrentA, float DeltaTime)
+{
+    BatteryTotalCurrentA = FMath::Max(TotalCurrentA, 0.f);
+
+    BatteryConsumedAh = FMath::Clamp(
+        BatteryConsumedAh + BatteryTotalCurrentA * DeltaTime / 3600.f,
+        0.f,
+        GetBatteryUsableCapacityAh()
+    );
+
+    BatterySoC = 1.f - BatteryConsumedAh / FMath::Max(GetBatteryUsableCapacityAh(), KINDA_SMALL_NUMBER);
+
+    BatteryOpenCircuitVoltage = EvaluateCellOCVFromSoC(BatterySoC) * BatterySeriesCells;
+
+    BatteryResistanceScale = EvaluateBatteryResistanceScaleFromSoC(BatterySoC);
+    const float EffectiveResistanceOhm = GetBatteryInternalResistanceOhm() * BatteryResistanceScale;
+
+    const float SagVoltage = BatteryTotalCurrentA * EffectiveResistanceOhm;
+    const float MinPackVoltage = BatterySeriesCells * BatteryCellVoltageCutoff;
+
+    BatteryLoadedVoltage = FMath::Max(BatteryOpenCircuitVoltage - SagVoltage, MinPackVoltage);
+
+    const float CellLoadedVoltage = BatteryLoadedVoltage / FMath::Max(BatterySeriesCells, 1);
+    BatteryOutputScale = EvaluateBatteryOutputScaleFromCellVoltage(CellLoadedVoltage);
+
+    bBatteryLowVoltageWarn = CellLoadedVoltage <= BatteryCellVoltageWarn;
+    bBatteryCriticalVoltage = CellLoadedVoltage <= BatteryCellVoltageCritical;
+    bBatteryCutoffActive = CellLoadedVoltage <= BatteryCellVoltageCutoff;
+}
+
+float AFPVDronePawn::EvaluateBatteryResistanceScaleFromSoC(float SoC) const
+{
+    const float S = FMath::Clamp(SoC, 0.f, 1.f);
+
+    if (S >= 0.30f)
+    {
+        return 1.f;
+    }
+
+    const float Alpha = S / 0.30f;
+    return FMath::Lerp(1.6f, 1.f, Alpha);
+}
+
+float AFPVDronePawn::EvaluateBatteryOutputScaleFromCellVoltage(float CellLoadedVoltage) const
+{
+    if (CellLoadedVoltage <= BatteryCellVoltageCutoff)
+    {
+        return 0.f;
+    }
+
+    if (CellLoadedVoltage >= BatteryCellVoltageCritical)
+    {
+        return 1.f;
+    }
+
+    return FMath::Clamp(
+        (CellLoadedVoltage - BatteryCellVoltageCutoff) /
+        FMath::Max(BatteryCellVoltageCritical - BatteryCellVoltageCutoff, KINDA_SMALL_NUMBER),
+        0.f,
+        1.f
+    );
 }
 

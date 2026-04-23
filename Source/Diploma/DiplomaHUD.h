@@ -5,6 +5,7 @@
 #include "DiplomaHUD.generated.h"
 
 class UDroneTelemetryWidget;
+class UUserWidget;
 
 UCLASS()
 class DIPLOMA_API ADiplomaHUD : public AHUD
@@ -33,6 +34,12 @@ protected:
 
 	UPROPERTY()
 	UDroneTelemetryWidget* TelemetryWidget = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, Category = "UI")
+	TSubclassOf<UUserWidget> FPVHUDWidgetClass;
+
+	UPROPERTY()
+	UUserWidget* FPVHUDWidget = nullptr;
 
 	float ThrottleMin = 999.f;
 	float ThrottleMax = -999.f;

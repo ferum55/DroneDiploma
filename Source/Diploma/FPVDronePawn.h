@@ -58,6 +58,7 @@ struct FMotorState
     float ElectricalPowerWatt = 0.f;
     float MechanicalPowerWatt = 0.f;
     float ReactionTorqueNm = 0.f;
+
 };
 
 USTRUCT()
@@ -198,7 +199,7 @@ private:
 
 
     UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
-    float MotorKV = 800.f;
+    float MotorKV = 900.f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
     float MotorVoltageLoaded = 23.8f;
@@ -215,6 +216,75 @@ private:
     UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
     float MinOmegaRad = 30.f;
 
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    int32 BatterySeriesCells = 6;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    int32 BatteryParallelCells = 3;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryCellCapacityAh = 5.0f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryCellInternalResistanceOhm = 0.012f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryCellVoltageFull = 4.2f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryCellVoltageNominal = 3.6f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryCellVoltageEmpty = 3.0f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryUsableFraction = 0.85f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryBenchReferenceVoltage = 25.2f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryPackMassKg = 1.28f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryConsumedAh = 0.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatterySoC = 1.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryOpenCircuitVoltage = 25.2f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryLoadedVoltage = 25.2f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryTotalCurrentA = 0.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryCellVoltageWarn = 3.30f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryCellVoltageCritical = 3.10f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryCellVoltageCutoff = 2.95f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryResistanceScale = 1.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    float BatteryOutputScale = 1.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    bool bBatteryLowVoltageWarn = false;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    bool bBatteryCriticalVoltage = false;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
+    bool bBatteryCutoffActive = false;
+
     float EvaluateMotorCurrentAmp(float Command) const;
     float EvaluateMotorThrustGramsFromCurrent(float CurrentAmp) const;
     float EvaluateMotorPowerWattFromCurrent(float CurrentAmp) const;
@@ -226,6 +296,16 @@ private:
     void UpdateMotorThrusts(float DeltaTime);
     void ApplyMotorForces();
     void ApplyAerodynamicDrag();
+
+    //Battery
+    float GetBatteryCapacityAh() const;
+    float GetBatteryUsableCapacityAh() const;
+    float GetBatteryInternalResistanceOhm() const;
+    float EvaluateCellOCVFromSoC(float SoC) const;
+    void ResetBatteryState();
+    void UpdateBatteryState(float TotalCurrentA, float DeltaTime);
+    float EvaluateBatteryResistanceScaleFromSoC(float SoC) const;
+    float EvaluateBatteryOutputScaleFromCellVoltage(float CellLoadedVoltage) const;
 
     //debug
     FFPVDebugState DebugState;
