@@ -4,8 +4,7 @@
 #include "GameFramework/HUD.h"
 #include "DiplomaHUD.generated.h"
 
-class UDroneTelemetryWidget;
-class UUserWidget;
+class UFPVHUDWidget;
 
 UCLASS()
 class DIPLOMA_API ADiplomaHUD : public AHUD
@@ -17,30 +16,9 @@ public:
 	virtual void DrawHUD() override;
 
 protected:
-	UPROPERTY(EditAnywhere, Category = "HUD")
-	float ReticleSize = 120.f;
-
-	UPROPERTY(EditAnywhere, Category = "HUD")
-	float ReticleGap = 35.f;
-
-	UPROPERTY(EditAnywhere, Category = "HUD")
-	float LineThickness = 2.f;
-
-	UPROPERTY(EditAnywhere, Category = "HUD")
-	float DotSize = 4.f;
-
 	UPROPERTY(EditDefaultsOnly, Category = "UI")
-	TSubclassOf<UDroneTelemetryWidget> TelemetryWidgetClass;
+	TSubclassOf<UFPVHUDWidget> FPVHUDWidgetClass;
 
 	UPROPERTY()
-	UDroneTelemetryWidget* TelemetryWidget = nullptr;
-
-	UPROPERTY(EditDefaultsOnly, Category = "UI")
-	TSubclassOf<UUserWidget> FPVHUDWidgetClass;
-
-	UPROPERTY()
-	UUserWidget* FPVHUDWidget = nullptr;
-
-	float ThrottleMin = 999.f;
-	float ThrottleMax = -999.f;
+	UFPVHUDWidget* FPVHUDWidget = nullptr;
 };

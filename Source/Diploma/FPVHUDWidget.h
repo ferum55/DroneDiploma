@@ -6,6 +6,7 @@
 #include "FPVHUDWidget.generated.h"
 
 class UTextBlock;
+class UCanvasPanel;
 
 UCLASS()
 class DIPLOMA_API UFPVHUDWidget : public UUserWidget
@@ -15,36 +16,6 @@ class DIPLOMA_API UFPVHUDWidget : public UUserWidget
 public:
 	UFUNCTION(BlueprintCallable)
 	void ApplyTelemetry(const FDroneTelemetry& InTelemetry);
-
-	UFUNCTION(BlueprintCallable)
-	void SetFlightModeText(const FString& InText);
-
-	UFUNCTION(BlueprintCallable)
-	void SetPrimaryLinkText(const FString& InText);
-
-	UFUNCTION(BlueprintCallable)
-	void SetVideoLinkText(const FString& InText);
-
-	UFUNCTION(BlueprintCallable)
-	void SetTxPowerText(const FString& InText);
-
-	UFUNCTION(BlueprintCallable)
-	void SetArmedText(const FString& InText);
-
-	UFUNCTION(BlueprintCallable)
-	void SetBombText(const FString& InText);
-
-	UFUNCTION(BlueprintCallable)
-	void SetHeadingText(const FString& InText);
-
-	UFUNCTION(BlueprintCallable)
-	void SetCompassText(const FString& InText);
-
-	UFUNCTION(BlueprintCallable)
-	void SetTimerText(const FString& InText);
-
-	UFUNCTION(BlueprintCallable)
-	void SetPitchCue(const FString& ArrowText, const FString& ValueText);
 
 protected:
 	UPROPERTY(meta = (BindWidget))
@@ -97,4 +68,13 @@ protected:
 
 	UPROPERTY(meta = (BindWidget))
 	UTextBlock* Text_PitchValue;
+
+	UPROPERTY(meta = (BindWidget))
+	UCanvasPanel* Canvas_HorizonRoot;
+
+	UPROPERTY(EditAnywhere, Category = "HUD")
+	float CameraPitchOffsetDeg = 20.f;
+
+	UPROPERTY(EditAnywhere, Category = "HUD")
+	float PixelsPerPitchDegree = 4.f;
 };
