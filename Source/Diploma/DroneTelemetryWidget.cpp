@@ -4,6 +4,7 @@
 
 void UDroneTelemetryWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 {
+	
 	if (TextSpeed)
 	{
 		TextSpeed->SetText(FText::FromString(

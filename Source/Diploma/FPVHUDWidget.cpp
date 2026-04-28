@@ -3,19 +3,22 @@
 #include "Components/CanvasPanel.h"
 #include "Slate/WidgetTransform.h"
 
+#include "Components/Image.h"
+#include "Materials/MaterialInstanceDynamic.h"
+
 void UFPVHUDWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 {
 	if (Text_PrimaryLink)
 	{
-		if (InTelemetry.bPrimaryLinkValid)
+		if (InTelemetry.bControlLinkValid)
 		{
 			Text_PrimaryLink->SetText(FText::FromString(
-				FString::Printf(TEXT("LINK: %.0f"), InTelemetry.PrimaryLinkPercent)
+				FString::Printf(TEXT("%.0f %.0f"), InTelemetry.ControlRSSIPercent, InTelemetry.ControlLQPercent)
 			));
 		}
 		else
 		{
-			Text_PrimaryLink->SetText(FText::FromString(TEXT("LINK: --")));
+			Text_PrimaryLink->SetText(FText::FromString(TEXT("-- --")));
 		}
 	}
 
@@ -24,12 +27,12 @@ void UFPVHUDWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 		if (InTelemetry.bVideoLinkValid)
 		{
 			Text_VideoLink->SetText(FText::FromString(
-				FString::Printf(TEXT("VIDEO: %.0f"), InTelemetry.VideoLinkPercent)
+				FString::Printf(TEXT("%.0f"), InTelemetry.VideoLinkPercent)
 			));
 		}
 		else
 		{
-			Text_VideoLink->SetText(FText::FromString(TEXT("VIDEO: --")));
+			Text_VideoLink->SetText(FText::FromString(TEXT("--")));
 		}
 	}
 
@@ -154,9 +157,25 @@ void UFPVHUDWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 		));
 	}
 
-	if (Text_CompassCardinals)
+	if (CompassMaterialInstance)
 	{
-		Text_CompassCardinals->SetText(FText::FromString(TEXT("W   N   E   S")));
+		float Heading = FMath::Fmod(InTelemetry.HeadingDeg, 360.f);
+
+		if (Heading < 0.f)
+		{
+			Heading += 360.f;
+		}
+
+		float Offset = Heading / 360.f;
+
+		if (bInvertCompassDirection)
+		{
+			Offset = -Offset;
+		}
+
+		Offset += CompassZeroOffset;
+
+		CompassMaterialInstance->SetScalarParameterValue(TEXT("CompassOffset"), Offset);
 	}
 
 	const float DisplayPitchDeg = InTelemetry.PitchDeg + CameraPitchOffsetDeg;
@@ -195,5 +214,22 @@ void UFPVHUDWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 T.Translation = FVector2D(0.f, HorizonOffsetY);
 		T.Angle = -InTelemetry.RollDeg;
 		Canvas_HorizonRoot->SetRenderTransform(T);
+	}
+}
+
+void UFPVHUDWidget::NativeConstruct()
+{
+	Super::NativeConstruct();
+
+	if (Image_CompassStrip)
+	{
+		UObject* Resource = Image_CompassStrip->Brush.GetResourceObject();
+		UMaterialInterface* Material = Cast<UMaterialInterface>(Resource);
+
+		if (Material)
+		{
+			CompassMaterialInstance = UMaterialInstanceDynamic::Create(Material, this);
+			Image_CompassStrip->SetBrushFromMaterial(CompassMaterialInstance);
+		}
 	}
 }

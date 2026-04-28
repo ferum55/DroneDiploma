@@ -5,6 +5,8 @@
 #include "GameFramework/Pawn.h"
 #include "DiplomaPawn.generated.h"
 
+class UMaterialInstanceDynamic;
+
 USTRUCT(BlueprintType)
 struct FDroneTelemetry
 {
@@ -93,6 +95,15 @@ struct FDroneTelemetry
 
 	UPROPERTY(BlueprintReadOnly)
 	bool bBombArmed = false;
+
+	UPROPERTY(BlueprintReadOnly)
+float ControlRSSIPercent = 0.f;
+
+UPROPERTY(BlueprintReadOnly)
+float ControlLQPercent = 0.f;
+
+UPROPERTY(BlueprintReadOnly)
+bool bControlLinkValid = false;
 };
 
 UCLASS(Config=Game)
@@ -128,6 +139,50 @@ protected:
 	//Telemetry
 	UPROPERTY(BlueprintReadOnly)
 	FDroneTelemetry Telemetry;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	FVector OperatorLocation = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlFrequencyMHz = 915.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoFrequencyMHz = 5800.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlMaxRangeM = 20000.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoCleanRangeM = 4500.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoUsableRangeM = 10000.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoMaxRangeM = 18000.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoTxPowerW = 2.5f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoAntennaGainDbi = 3.5f;
+
+	float SmoothedControlRSSI = 100.f;
+	float SmoothedControlLQ = 100.f;
+	float SmoothedVideoLink = 100.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float SignalSmoothingSpeed = 3.f;
+	float LastDeltaSeconds = 0.f;
+
+	//Interference
+	
+
+	UPROPERTY()
+	UMaterialInstanceDynamic* FPVPostProcessMID = nullptr;
+
+	void UpdateSignalTelemetry(float DeltaTime);
+	float ComputeOperatorObstructionFactor() const;
 
 	// Begin APawn overrides
 	virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override; // Allows binding actions/axes to functions

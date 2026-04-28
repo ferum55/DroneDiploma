@@ -46,6 +46,7 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	UProgressBar* BarYaw;
 
+
 	//test
 public:
 	UPROPERTY(meta = (BindWidget))

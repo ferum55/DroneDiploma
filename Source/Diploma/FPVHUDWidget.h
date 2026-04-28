@@ -3,7 +3,11 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "DiplomaPawn.h"
+#include "Components/Image.h"
+#include "Materials/MaterialInstanceDynamic.h"
+
 #include "FPVHUDWidget.generated.h"
+
 
 class UTextBlock;
 class UCanvasPanel;
@@ -61,9 +65,6 @@ protected:
 	UTextBlock* Text_HeadingDegrees;
 
 	UPROPERTY(meta = (BindWidget))
-	UTextBlock* Text_CompassCardinals;
-
-	UPROPERTY(meta = (BindWidget))
 	UTextBlock* Text_PitchArrow;
 
 	UPROPERTY(meta = (BindWidget))
@@ -77,4 +78,19 @@ protected:
 
 	UPROPERTY(EditAnywhere, Category = "HUD")
 	float PixelsPerPitchDegree = 4.f;
+
+	//Compass
+	virtual void NativeConstruct() override;
+
+	UPROPERTY(meta = (BindWidget))
+	UImage* Image_CompassStrip = nullptr;
+
+	UPROPERTY()
+	UMaterialInstanceDynamic* CompassMaterialInstance = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compass")
+	float CompassZeroOffset = 0.75f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compass")
+	bool bInvertCompassDirection = false;
 };

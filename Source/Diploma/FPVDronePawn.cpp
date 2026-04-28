@@ -1,6 +1,8 @@
 ﻿
 #include "FPVDronePawn.h"
 #include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 
 AFPVDronePawn::AFPVDronePawn()
 {
@@ -60,6 +62,8 @@ void AFPVDronePawn::BeginPlay()
     PlaneMesh->BodyInstance.InertiaTensorScale = FVector(1.f, 1.f, 0.1f);
     PlaneMesh->RecreatePhysicsState();
     PlaneMesh->SetCenterOfMass(FVector(-0.884f, -0.006f, -0.101f));
+
+
 
     const FVector I = PlaneMesh->GetInertiaTensor();
 
@@ -681,27 +685,18 @@ float AFPVDronePawn::EvaluateBatteryOutputScaleFromCellVoltage(float CellLoadedV
     );
 }
 
+
 void AFPVDronePawn::UpdateTelemetry()
 {
     Super::UpdateTelemetry();
 
     Telemetry.FlightMode = TEXT("ACRO");
-
     Telemetry.PackVoltage = BatteryLoadedVoltage;
     Telemetry.CellVoltage = BatterySeriesCells > 0 ? BatteryLoadedVoltage / BatterySeriesCells : 0.f;
     Telemetry.ConsumedMah = BatteryConsumedAh * 1000.f;
     Telemetry.CurrentAmp = BatteryTotalCurrentA;
     Telemetry.bBatteryValid = true;
-
-    Telemetry.PrimaryLinkPercent = 0.f;
-    Telemetry.bPrimaryLinkValid = false;
-
-    Telemetry.VideoLinkPercent = VideoLinkPercentValue;
-    Telemetry.bVideoLinkValid = true;
-
     Telemetry.TxPowerW = TxPowerWValue;
     Telemetry.bTxPowerValid = true;
-
     Telemetry.bBombArmed = bBombArmed;
 }
-

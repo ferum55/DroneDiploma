@@ -13,6 +13,11 @@
 #include "GameFramework/InputSettings.h"
 #include "Engine/Engine.h"
 
+#include "Camera/CameraComponent.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Engine/EngineTypes.h"
+
 
 
 ADiplomaPawn::ADiplomaPawn()
@@ -56,6 +61,24 @@ ADiplomaPawn::ADiplomaPawn()
 	Camera->FieldOfView = 100.f;
 	Camera->SetRelativeLocation(FVector(0.f, 0.f, 0.f));
 
+	if (Camera)
+	{
+		if (Camera->PostProcessSettings.WeightedBlendables.Array.Num() > 0)
+		{
+			auto& Blendable = Camera->PostProcessSettings.WeightedBlendables.Array[0];
+
+			if (Blendable.Object)
+			{
+				FPVPostProcessMID = UMaterialInstanceDynamic::Create(
+					Cast<UMaterialInterface>(Blendable.Object),
+					this
+				);
+
+				Blendable.Object = FPVPostProcessMID;
+			}
+		}
+	}
+
 
 	Throttle = 0.f;
 	PitchInput = 0.f;
@@ -77,6 +100,8 @@ void ADiplomaPawn::BeginPlay()
 {
 	Super::BeginPlay();
 	BaroZeroZ = GetActorLocation().Z;
+	OperatorLocation = GetActorLocation();
+	
 	TelemetryStartTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
 	PlaneMesh->SetCenterOfMass(FVector::ZeroVector, NAME_None);
 
@@ -123,6 +148,41 @@ void ADiplomaPawn::BeginPlay()
 		PC->SetInputMode(FInputModeGameOnly());
 		PC->bShowMouseCursor = false;
 	}
+	if (!Camera)
+	{
+		UE_LOG(LogTemp, Error, TEXT("PP | Camera is null"));
+	}
+	else
+	{
+		const int32 Count = Camera->PostProcessSettings.WeightedBlendables.Array.Num();
+
+		UE_LOG(LogTemp, Warning, TEXT("PP | Blendables count: %d"), Count);
+
+		if (Count > 0)
+		{
+			FWeightedBlendable& Blendable = Camera->PostProcessSettings.WeightedBlendables.Array[0];
+			UObject* Obj = Blendable.Object;
+
+			UE_LOG(LogTemp, Warning,
+				TEXT("PP | Blendable[0]: %s | Class: %s"),
+				Obj ? *Obj->GetName() : TEXT("None"),
+				Obj ? *Obj->GetClass()->GetName() : TEXT("None")
+			);
+
+			UMaterialInterface* MaterialInterface = Cast<UMaterialInterface>(Obj);
+
+			if (MaterialInterface)
+			{
+				FPVPostProcessMID = UMaterialInstanceDynamic::Create(MaterialInterface, this);
+				Blendable.Object = FPVPostProcessMID;
+			}
+		}
+
+		UE_LOG(LogTemp, Warning,
+			TEXT("PP | MID created: %s"),
+			FPVPostProcessMID ? TEXT("YES") : TEXT("NO")
+		);
+	}
 }
 
 
@@ -151,6 +211,7 @@ void ADiplomaPawn::Tick(float DeltaSeconds)
 	float NormPitch = NormalizeCenteredAxis(RawPitch);
 	float NormRoll = NormalizeCenteredAxis(RawRoll);
 	float NormYaw = NormalizeCenteredAxis(RawYaw);
+	LastDeltaSeconds = DeltaSeconds;
 
 	/*UE_LOG(LogTemp, Warning,
 		TEXT("RAW  T=%.3f P=%.3f R=%.3f Y=%.3f | NORM  T=%.3f P=%.3f R=%.3f Y=%.3f"),
@@ -413,6 +474,7 @@ void ADiplomaPawn::UpdateTelemetry()
 	Telemetry.bTxPowerValid = false;
 
 	Telemetry.bBombArmed = false;
+	UpdateSignalTelemetry(LastDeltaSeconds);
 }
 
 float ADiplomaPawn::GetRadioAltitudeMeters(bool& bValid) const
@@ -491,4 +553,178 @@ float ADiplomaPawn::NormalizeCenteredAxis(float Raw) const
 	}
 
 	return Value;
+}
+void ADiplomaPawn::UpdateSignalTelemetry(float DeltaTime)
+{
+	if (!PlaneMesh)
+	{
+		return;
+	}
+
+	const float DistanceM = FVector::Distance(
+		PlaneMesh->GetComponentLocation(),
+		OperatorLocation
+	) / 100.f;
+
+	const float Obstruction = ComputeOperatorObstructionFactor();
+
+	const float ControlAlpha = FMath::Clamp(
+		DistanceM / FMath::Max(ControlMaxRangeM, 1.f),
+		0.f,
+		1.f
+	);
+
+	float ControlRSSI = 100.f * (1.f - FMath::Pow(ControlAlpha, 1.35f));
+	ControlRSSI -= Obstruction * 20.f;
+	ControlRSSI = FMath::Clamp(ControlRSSI, 0.f, 100.f);
+
+	float ControlLQ = 100.f;
+
+	if (ControlRSSI < 45.f)
+	{
+		ControlLQ = FMath::GetMappedRangeValueClamped(
+			FVector2D(10.f, 45.f),
+			FVector2D(20.f, 100.f),
+			ControlRSSI
+		);
+	}
+
+	ControlLQ -= Obstruction * 12.f;
+	ControlLQ = FMath::Clamp(ControlLQ, 0.f, 100.f);
+
+	float VideoQuality = 100.f;
+
+	if (DistanceM <= VideoCleanRangeM)
+	{
+		const float CleanAlpha = FMath::Clamp(
+			DistanceM / FMath::Max(VideoCleanRangeM, 1.f),
+			0.f,
+			1.f
+		);
+
+		VideoQuality = FMath::Lerp(100.f, 85.f, FMath::Pow(CleanAlpha, 1.2f));
+	}
+	else if (DistanceM <= VideoUsableRangeM)
+	{
+		const float UsableAlpha = FMath::Clamp(
+			(DistanceM - VideoCleanRangeM) / FMath::Max(VideoUsableRangeM - VideoCleanRangeM, 1.f),
+			0.f,
+			1.f
+		);
+
+		VideoQuality = FMath::Lerp(85.f, 45.f, FMath::Pow(UsableAlpha, 1.1f));
+	}
+	else
+	{
+		const float MaxAlpha = FMath::Clamp(
+			(DistanceM - VideoUsableRangeM) / FMath::Max(VideoMaxRangeM - VideoUsableRangeM, 1.f),
+			0.f,
+			1.f
+		);
+
+		VideoQuality = FMath::Lerp(45.f, 0.f, FMath::Pow(MaxAlpha, 0.85f));
+	}
+
+	VideoQuality -= Obstruction * 45.f;
+	VideoQuality = FMath::Clamp(VideoQuality, 0.f, 100.f);
+
+	SmoothedControlRSSI = FMath::FInterpTo(SmoothedControlRSSI, ControlRSSI, DeltaTime, SignalSmoothingSpeed);
+	SmoothedControlLQ = FMath::FInterpTo(SmoothedControlLQ, ControlLQ, DeltaTime, SignalSmoothingSpeed);
+	SmoothedVideoLink = FMath::FInterpTo(SmoothedVideoLink, VideoQuality, DeltaTime, SignalSmoothingSpeed);
+
+	Telemetry.ControlRSSIPercent = SmoothedControlRSSI;
+	Telemetry.ControlLQPercent = SmoothedControlLQ;
+	Telemetry.bControlLinkValid = true;
+
+	Telemetry.VideoLinkPercent = SmoothedVideoLink;
+	Telemetry.bVideoLinkValid = true;
+
+	static float SignalLogTimer = 0.f;
+	SignalLogTimer += DeltaTime;
+
+	if (SignalLogTimer >= 0.5f)
+	{
+		SignalLogTimer = 0.f;
+
+		UE_LOG(LogTemp, Warning,
+			TEXT("SIGNAL | Dist=%.1fm | Obstruction=%.2f | CTRL RSSI=%.0f LQ=%.0f | VIDEO=%.0f"),
+			DistanceM,
+			Obstruction,
+			Telemetry.ControlRSSIPercent,
+			Telemetry.ControlLQPercent,
+			Telemetry.VideoLinkPercent
+		);
+	}
+	if (FPVPostProcessMID)
+	{
+		const float VideoQuality01 = Telemetry.VideoLinkPercent / 100.f;
+		FPVPostProcessMID->SetScalarParameterValue(TEXT("VideoQuality"), VideoQuality01);
+		static float PPLogTimer = 0.f;
+		PPLogTimer += DeltaTime;
+
+		if (PPLogTimer >= 0.5f)
+		{
+			PPLogTimer = 0.f;
+
+			UE_LOG(LogTemp, Warning,
+				TEXT("PP | VideoQuality01=%.2f | MID=%s"),
+				VideoQuality01,
+				FPVPostProcessMID ? TEXT("YES") : TEXT("NO")
+			);
+		}
+	}
+}
+
+float ADiplomaPawn::ComputeOperatorObstructionFactor() const
+{
+	if (!GetWorld() || !PlaneMesh)
+	{
+		return 1.f;
+	}
+
+	const FVector DroneLocation = PlaneMesh->GetComponentLocation();
+	const FVector OperatorEyeLocation = OperatorLocation + FVector(0.f, 0.f, 170.f);
+
+	const FVector Direction = (OperatorEyeLocation - DroneLocation).GetSafeNormal();
+	const FVector Right = FVector::CrossProduct(Direction, FVector::UpVector).GetSafeNormal();
+	const FVector Up = FVector::CrossProduct(Right, Direction).GetSafeNormal();
+
+	const float TraceSpreadCm = 120.f;
+
+	TArray<FVector> Offsets;
+	Offsets.Add(FVector::ZeroVector);
+	Offsets.Add(Right * TraceSpreadCm);
+	Offsets.Add(-Right * TraceSpreadCm);
+	Offsets.Add(Up * TraceSpreadCm);
+	Offsets.Add(-Up * TraceSpreadCm);
+
+	FCollisionQueryParams Params;
+	Params.AddIgnoredActor(this);
+
+	int32 BlockedCount = 0;
+
+	for (const FVector& Offset : Offsets)
+	{
+		FHitResult Hit;
+
+		const FVector Start = DroneLocation + Offset;
+		const FVector End = OperatorEyeLocation + Offset;
+
+		const bool bHit = GetWorld()->LineTraceSingleByChannel(
+			Hit,
+			Start,
+			End,
+			ECC_Visibility,
+			Params
+		);
+
+		if (bHit)
+		{
+			BlockedCount++;
+		}
+	}
+
+	const float RawObstruction = static_cast<float>(BlockedCount) / static_cast<float>(Offsets.Num());
+
+	return FMath::Clamp(RawObstruction, 0.f, 1.f);
 }
