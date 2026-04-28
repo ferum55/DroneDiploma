@@ -97,13 +97,19 @@ struct FDroneTelemetry
 	bool bBombArmed = false;
 
 	UPROPERTY(BlueprintReadOnly)
-float ControlRSSIPercent = 0.f;
+	float ControlRSSIPercent = 0.f;
 
-UPROPERTY(BlueprintReadOnly)
-float ControlLQPercent = 0.f;
+	UPROPERTY(BlueprintReadOnly)
+	float ControlLQPercent = 0.f;
 
-UPROPERTY(BlueprintReadOnly)
-bool bControlLinkValid = false;
+	UPROPERTY(BlueprintReadOnly)
+	bool bControlLinkValid = false;
+
+	UPROPERTY(BlueprintReadOnly)
+	float ControlInputScale = 1.f;
+
+	UPROPERTY(BlueprintReadOnly)
+	bool bControlFailsafeActive = false;
 };
 
 UCLASS(Config=Game)
@@ -123,6 +129,13 @@ public:
 	float GetRollInput() const { return RollInput; }
 	float GetPitchInput() const { return PitchInput; }
 	float GetYawInput() const { return YawInput; }
+
+	float GetReceivedThrottle() const { return ReceivedThrottle; }
+	float GetReceivedPitchInput() const { return ReceivedPitchInput; }
+	float GetReceivedRollInput() const { return ReceivedRollInput; }
+	float GetReceivedYawInput() const { return ReceivedYawInput; }
+	float GetControlInputScale() const { return ControlInputScale; }
+	bool IsControlFailsafeActive() const { return bControlFailsafeActive; }
 
 	const FDroneTelemetry& GetTelemetry() const { return Telemetry; }
 
@@ -150,7 +163,7 @@ protected:
 	float VideoFrequencyMHz = 5800.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
-	float ControlMaxRangeM = 20000.f;
+	float ControlMaxRangeM = 300.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
 	float VideoCleanRangeM = 4500.f;
@@ -175,6 +188,37 @@ protected:
 	float SignalSmoothingSpeed = 3.f;
 	float LastDeltaSeconds = 0.f;
 
+	float ReceivedThrottle = 0.f;
+	float ReceivedPitchInput = 0.f;
+	float ReceivedRollInput = 0.f;
+	float ReceivedYawInput = 0.f;
+
+	float ControlInputScale = 1.f;
+	bool bControlFailsafeActive = false;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlDegradedLQ = 60.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlCriticalLQ = 25.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlFailsafeLQ = 10.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlCriticalInputScale = 0.35f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlMinimumInputScale = 0.15f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlFailsafeEnterDelay = 0.5f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlFailsafeRecoverLQ = 25.f;
+
+	float ControlFailsafeTimer = 0.f;
+
 	//Interference
 	
 
@@ -183,6 +227,8 @@ protected:
 
 	void UpdateSignalTelemetry(float DeltaTime);
 	float ComputeOperatorObstructionFactor() const;
+
+	void UpdateReceivedControlInput();
 
 	// Begin APawn overrides
 	virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override; // Allows binding actions/axes to functions

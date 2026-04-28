@@ -9,7 +9,6 @@ AFPVDronePawn::AFPVDronePawn()
     ArmX = 16.67f;
     ArmY= 14.5f;
     MotorKV = 900.f;
-    MotorVoltageLoaded = 23.8f;
     MotorResponseUpRPM = 14.f;
     MotorResponseDownRPM = 10.f;
     MotorMechanicalEfficiency = 0.85f;
@@ -153,7 +152,7 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
         return;
     }
 
-    const float BaseThrottle = FMath::Clamp(Throttle, 0.f, 1.f);
+    const float BaseThrottle = FMath::Clamp(GetReceivedThrottle(), 0.f, 1.f);
 
     if (BaseThrottle < 0.02f)
     {
@@ -177,9 +176,9 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
     const float CurrentPitchRateNorm = LocalAngVelDeg.Y / MaxPitchRate;
     const float CurrentYawRateNorm = LocalAngVelDeg.Z / MaxYawRate;
 
-    const float TargetRollRateNorm = -GetRollInput();
-    const float TargetPitchRateNorm = GetPitchInput();
-    const float TargetYawRateNorm = GetYawInput();
+    const float TargetRollRateNorm = -GetReceivedRollInput();
+    const float TargetPitchRateNorm = GetReceivedPitchInput();
+    const float TargetYawRateNorm = GetReceivedYawInput();
 
     const float RollCmd = FMath::Clamp(RollPID.Update(TargetRollRateNorm, CurrentRollRateNorm, DeltaTime), -0.05f, 0.05f);
     const float PitchCmd = FMath::Clamp(PitchPID.Update(TargetPitchRateNorm, CurrentPitchRateNorm, DeltaTime), -0.05f, 0.05f);
@@ -218,9 +217,9 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
     DebugState.BR = BR;
 
     DebugState.Throttle = BaseThrottle;
-    DebugState.PitchInput = GetPitchInput();
-    DebugState.RollInput = GetRollInput();
-    DebugState.YawInput = GetYawInput();
+    DebugState.PitchInput = GetReceivedPitchInput();
+    DebugState.RollInput = GetReceivedRollInput();
+    DebugState.YawInput = GetReceivedYawInput();
 
     DebugLogTimer += DeltaTime;
 
@@ -311,29 +310,32 @@ float AFPVDronePawn::ComputePropEfficiencyFactor(const FVector& LocalVelocityMps
 void AFPVDronePawn::ApplyAerodynamicDrag()
 {
     UStaticMeshComponent* Mesh = GetPlaneMesh();
-    if (!Mesh)
-    {
-        return;
-    }
+    if (!Mesh) return;
 
     const FVector WorldVelCm = Mesh->GetPhysicsLinearVelocity();
-    if (WorldVelCm.SizeSquared() < 1.f)
-    {
-        return;
-    }
+    if (WorldVelCm.SizeSquared() < 1.f) return;
 
     const FTransform MeshTransform = Mesh->GetComponentTransform();
     const FVector LocalVelMps = MeshTransform.InverseTransformVectorNoScale(WorldVelCm) / 100.f;
 
-    auto ComputeAxisDrag = [this](float VelocityMps, float Cd, float Area) -> float
+    const FRotator WorldRot = Mesh->GetComponentRotation();
+    const float PitchRad = FMath::DegreesToRadians(FMath::Abs(WorldRot.Pitch));
+    const float RollRad = FMath::DegreesToRadians(FMath::Abs(WorldRot.Roll));
+
+    const float A_forward_eff = AreaForward * FMath::Cos(PitchRad)
+        + AreaVertical * FMath::Sin(PitchRad);
+    const float A_lateral_eff = AreaLateral * FMath::Cos(RollRad)
+        + AreaVertical * FMath::Sin(RollRad);
+
+    auto ComputeAxisDrag = [&](float VelocityMps, float Cd, float Area) -> float
         {
             const float SpeedAbs = FMath::Abs(VelocityMps);
             const float DragMagnitude = 0.5f * AirDensity * Cd * Area * SpeedAbs * SpeedAbs;
             return -FMath::Sign(VelocityMps) * DragMagnitude;
         };
 
-    const float DragX_N = ComputeAxisDrag(LocalVelMps.X, CdForward, AreaForward);
-    const float DragY_N = ComputeAxisDrag(LocalVelMps.Y, CdLateral, AreaLateral);
+    const float DragX_N = ComputeAxisDrag(LocalVelMps.X, CdForward, A_forward_eff);
+    const float DragY_N = ComputeAxisDrag(LocalVelMps.Y, CdLateral, A_lateral_eff);
     const float DragZBody_N = ComputeAxisDrag(LocalVelMps.Z, CdVertical, AreaVertical);
 
     const float RotorDiscRadiusM = RotorDiscDiameterM * 0.5f;
@@ -341,63 +343,123 @@ void AFPVDronePawn::ApplyAerodynamicDrag()
     const float EffectiveRotorAreaM2 = TotalRotorDiscAreaM2 * RotorVerticalAreaFactor;
     const float DragZRotor_N = ComputeAxisDrag(LocalVelMps.Z, RotorVerticalCd, EffectiveRotorAreaM2);
 
-    const FVector LocalDragN(
-        DragX_N,
-        DragY_N,
-        DragZBody_N + DragZRotor_N
-    );
-
+    const FVector LocalDragN(DragX_N, DragY_N, DragZBody_N + DragZRotor_N);
     const FVector WorldDragCm = MeshTransform.TransformVectorNoScale(LocalDragN * 100.f);
     Mesh->AddForce(WorldDragCm);
+
+    // ── Drag debug log ──────────────────────────────────────────────
+    //static float DragLogTimer = 0.f;
+    //DragLogTimer += LastDeltaSeconds;
+
+    //if (DragLogTimer >= 0.5f)
+    //{
+    //    DragLogTimer = 0.f;
+
+    //    const FVector WorldVelMps = WorldVelCm / 100.f;
+    //    const float SpeedMps = WorldVelMps.Size();
+    //    const float SpeedKmh = SpeedMps * 3.6f;
+    //    const float SpeedHorizMps = FVector2D(WorldVelMps.X, WorldVelMps.Y).Size();
+    //    const float SpeedHorizKmh = SpeedHorizMps * 3.6f;
+    //    const float VertSpeedMps = WorldVelMps.Z;
+
+    //    const float TotalDragN = FVector(DragX_N, DragY_N, DragZBody_N + DragZRotor_N).Size();
+
+    //    float TotalThrustN = 0.f;
+    //    float ThrottleAvg = 0.f;
+    //    for (const FMotorState& M : Motors)
+    //    {
+    //        TotalThrustN += M.ThrustNewton;
+    //        ThrottleAvg += M.CurrentCommand;
+    //    }
+    //    if (Motors.Num() > 0) ThrottleAvg /= Motors.Num();
+
+    //    // Розкладаємо тягу на горизонтальну і вертикальну складові
+    //    const float PitchDeg = FMath::RadiansToDegrees(PitchRad);
+    //    const float ThrustVertN = TotalThrustN * FMath::Cos(PitchRad);
+    //    const float ThrustHorizN = TotalThrustN * FMath::Sin(PitchRad);
+
+    //    // Сили балансу
+    //    const float WeightN = GetPlaneMesh()->GetMass() * 9.81f;
+    //    const float CosPitch = FMath::Cos(PitchRad);
+    //    const float SinPitch = FMath::Sin(PitchRad);
+
+    //    const float DragZval = DragZBody_N + DragZRotor_N;
+
+    //    const float HorizDragTotal = FMath::Abs(DragX_N) * CosPitch
+    //        + FMath::Abs(DragZval) * SinPitch;
+    //    const float VertDragTotal = FMath::Abs(DragX_N) * SinPitch
+    //        + FMath::Abs(DragZval) * CosPitch;
+
+    //    const float VertBalanceN = ThrustVertN - WeightN - VertDragTotal;
+    //    const float HorizBalanceN = ThrustHorizN - HorizDragTotal;
+
+    //    UE_LOG(LogTemp, Warning,
+    //        TEXT("[FLIGHT] Thr=%.0f%% Pitch=%.1f°")
+    //        TEXT(" | V=%.1fkm/h H=%.1fkm/h Vz=%+.2fm/s")
+    //        TEXT(" | Thrust=%.1fN (V:%.1f H:%.1f) Weight=%.1fN")
+    //        TEXT(" | DragX=%.1fN DragZ=%.1fN TotalDrag=%.1fN")
+    //        TEXT(" | VertBal=%+.1fN HorizBal=%+.1fN")
+    //        TEXT(" | A_eff=%.4fm²"),
+    //        ThrottleAvg * 100.f,
+    //        PitchDeg,
+    //        SpeedKmh, SpeedHorizKmh, VertSpeedMps,
+    //        TotalThrustN, ThrustVertN, ThrustHorizN, WeightN,
+    //        DragX_N, DragZBody_N + DragZRotor_N, TotalDragN,
+    //        VertBalanceN, HorizBalanceN,
+    //        A_forward_eff
+    //    );
+    //}
+    // ── End drag debug log ──────────────────────────────────────────
 }
 
 
-float AFPVDronePawn::EvaluateMotorCurrentAmp(float Command) const
-{
-    const float C = FMath::Clamp(Command, 0.f, 1.f);
-    return 65.9f * FMath::Pow(C, 2.718f);;
-}
-float AFPVDronePawn::EvaluateMotorThrustGramsFromCurrent(float CurrentAmp) const
-{
-    static const TArray<float> X = { 0.f, 5.f, 10.f, 15.f, 20.f, 25.f, 30.f, 65.9f };
-    static const TArray<float> Y = { 0.f, 835.f, 1420.f, 1885.f, 2200.f, 2521.f, 2828.f, 4680.f };
-
-    const float A = FMath::Clamp(CurrentAmp, 0.f, X.Last());
-
-    if (A <= X[0]) return Y[0];
-    if (A >= X.Last()) return Y.Last();
-
-    for (int32 i = 0; i < X.Num() - 1; i++)
-    {
-        if (A >= X[i] && A <= X[i + 1])
-        {
-            const float Alpha = (A - X[i]) / (X[i + 1] - X[i]);
-            return FMath::Lerp(Y[i], Y[i + 1], Alpha);
-        }
-    }
-
-    return Y.Last();
-}float AFPVDronePawn::EvaluateMotorPowerWattFromCurrent(float CurrentAmp) const
-{
-    static const TArray<float> X = { 0.f, 5.f, 10.f, 15.f, 20.f, 25.f, 30.f, 65.9f };
-    static const TArray<float> Y = { 0.f, 120.40f, 239.90f, 358.70f, 477.20f, 594.80f, 711.40f, 1537.40f };
-
-    const float A = FMath::Clamp(CurrentAmp, 0.f, X.Last());
-
-    if (A <= X[0]) return Y[0];
-    if (A >= X.Last()) return Y.Last();
-
-    for (int32 i = 0; i < X.Num() - 1; i++)
-    {
-        if (A >= X[i] && A <= X[i + 1])
-        {
-            const float Alpha = (A - X[i]) / (X[i + 1] - X[i]);
-            return FMath::Lerp(Y[i], Y[i + 1], Alpha);
-        }
-    }
-
-    return Y.Last();
-}
+//float AFPVDronePawn::EvaluateMotorCurrentAmp(float Command) const
+//{
+//    const float C = FMath::Clamp(Command, 0.f, 1.f);
+//    return 65.9f * FMath::Pow(C, 2.718f);;
+//}
+//float AFPVDronePawn::EvaluateMotorThrustGramsFromCurrent(float CurrentAmp) const
+//{
+//    static const TArray<float> X = { 0.f, 5.f, 10.f, 15.f, 20.f, 25.f, 30.f, 65.9f };
+//    static const TArray<float> Y = { 0.f, 835.f, 1420.f, 1885.f, 2200.f, 2521.f, 2828.f, 4680.f };
+//
+//    const float A = FMath::Clamp(CurrentAmp, 0.f, X.Last());
+//
+//    if (A <= X[0]) return Y[0];
+//    if (A >= X.Last()) return Y.Last();
+//
+//    for (int32 i = 0; i < X.Num() - 1; i++)
+//    {
+//        if (A >= X[i] && A <= X[i + 1])
+//        {
+//            const float Alpha = (A - X[i]) / (X[i + 1] - X[i]);
+//            return FMath::Lerp(Y[i], Y[i + 1], Alpha);
+//        }
+//    }
+//
+//    return Y.Last();
+//}
+//float AFPVDronePawn::EvaluateMotorPowerWattFromCurrent(float CurrentAmp) const
+//{
+//    static const TArray<float> X = { 0.f, 5.f, 10.f, 15.f, 20.f, 25.f, 30.f, 65.9f };
+//    static const TArray<float> Y = { 0.f, 120.40f, 239.90f, 358.70f, 477.20f, 594.80f, 711.40f, 1537.40f };
+//
+//    const float A = FMath::Clamp(CurrentAmp, 0.f, X.Last());
+//
+//    if (A <= X[0]) return Y[0];
+//    if (A >= X.Last()) return Y.Last();
+//
+//    for (int32 i = 0; i < X.Num() - 1; i++)
+//    {
+//        if (A >= X[i] && A <= X[i + 1])
+//        {
+//            const float Alpha = (A - X[i]) / (X[i + 1] - X[i]);
+//            return FMath::Lerp(Y[i], Y[i + 1], Alpha);
+//        }
+//    }
+//
+//    return Y.Last();
+//}
 
 void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
 {
@@ -535,7 +597,7 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
     AvgRPM = Motors.Num() > 0 ? AvgRPM / Motors.Num() : 0.f;
     UpdateBatteryState(TotalCurrentA, DeltaTime);
 
-    static float MotorLogTimer = 0.f;
+    /*static float MotorLogTimer = 0.f;
     MotorLogTimer += DeltaTime;
 
     if (MotorLogTimer >= 0.25f)
@@ -565,7 +627,7 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
             Motors[2].Command, Motors[2].CurrentRPM, Motors[2].ThrustNewton, Motors[2].CurrentDrawAmp,
             Motors[3].Command, Motors[3].CurrentRPM, Motors[3].ThrustNewton, Motors[3].CurrentDrawAmp
         );
-    }
+    }*/
 }
 
 float AFPVDronePawn::GetBatteryCapacityAh() const

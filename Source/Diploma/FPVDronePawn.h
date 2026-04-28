@@ -117,13 +117,13 @@ private:
     float AirDensity = 1.225f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float CdForward = 14.f;
+    float CdForward = 1.5f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float CdLateral = 15.f;
+    float CdLateral = 2.5f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float CdVertical = 2.f;
+    float CdVertical = 1.5f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
     float AreaForward = 0.003916f;
@@ -153,14 +153,6 @@ private:
     UPROPERTY(EditAnywhere, Category = "FPV|Motors")
     float ArmY = 0.f;
 
-    // Максимальна тяга одного мотора в Ньютонах
-    UPROPERTY(EditAnywhere, Category = "FPV|Motors")
-    float MaxMotorThrust = 0.f;
-
-    // Коефіцієнт реактивного торку мотора (yaw від різниці CW/CCW)
-    UPROPERTY(EditAnywhere, Category = "FPV|Motors")
-    float MotorYawTorquePerNewton;
-
     UPROPERTY(EditAnywhere, Category = "FPV|Rates")
     float MaxPitchRate = 0.f;
 
@@ -189,26 +181,11 @@ private:
 
 
     UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
-    float MotorPropTorqueCoeff = 0.00000002f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
-    float MotorResponseUp = 8.f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
-    float MotorResponseDown = 6.f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
     float MotorThrustScale = 0.90f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
-    float MotorTorquePerNewtonMeter = 0.032f;
 
 
     UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
     float MotorKV = 900.f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
-    float MotorVoltageLoaded = 23.8f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
     float MotorResponseUpRPM = 14.f;
@@ -291,8 +268,8 @@ private:
     UPROPERTY(EditAnywhere, Category = "FPV|Battery")
     bool bBatteryCutoffActive = false;
 
-    UPROPERTY(EditAnywhere, Category = "FPV|Telemetry")
-    float VideoLinkPercentValue = 100.f;
+    /*UPROPERTY(EditAnywhere, Category = "FPV|Telemetry")
+    float VideoLinkPercentValue = 100.f;*/
 
     UPROPERTY(EditAnywhere, Category = "FPV|Telemetry")
     float TxPowerWValue = 2.5f;
@@ -300,9 +277,9 @@ private:
     UPROPERTY(EditAnywhere, Category = "FPV|Payload")
     bool bBombArmed = false;
 
-    float EvaluateMotorCurrentAmp(float Command) const;
+    /*float EvaluateMotorCurrentAmp(float Command) const;
     float EvaluateMotorThrustGramsFromCurrent(float CurrentAmp) const;
-    float EvaluateMotorPowerWattFromCurrent(float CurrentAmp) const;
+    float EvaluateMotorPowerWattFromCurrent(float CurrentAmp) const;*/
     void UpdateMotorDynamics(float DeltaTime);
     float ComputePropEfficiencyFactor(const FVector& LocalVelocityMps) const;
 

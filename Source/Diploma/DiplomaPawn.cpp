@@ -589,7 +589,13 @@ void ADiplomaPawn::UpdateSignalTelemetry(float DeltaTime)
 		);
 	}
 
-	ControlLQ -= Obstruction * 12.f;
+	ControlLQ = FMath::GetMappedRangeValueClamped(
+		FVector2D(0.f, 70.f),
+		FVector2D(0.f, 100.f),
+		ControlRSSI
+	);
+
+	ControlLQ -= Obstruction * 35.f;
 	ControlLQ = FMath::Clamp(ControlLQ, 0.f, 100.f);
 
 	float VideoQuality = 100.f;
@@ -636,8 +642,13 @@ void ADiplomaPawn::UpdateSignalTelemetry(float DeltaTime)
 	Telemetry.ControlLQPercent = SmoothedControlLQ;
 	Telemetry.bControlLinkValid = true;
 
+	Telemetry.PrimaryLinkPercent = SmoothedControlRSSI;
+	Telemetry.bPrimaryLinkValid = true;
+
 	Telemetry.VideoLinkPercent = SmoothedVideoLink;
 	Telemetry.bVideoLinkValid = true;
+
+	UpdateReceivedControlInput();
 
 	static float SignalLogTimer = 0.f;
 	SignalLogTimer += DeltaTime;
@@ -647,11 +658,13 @@ void ADiplomaPawn::UpdateSignalTelemetry(float DeltaTime)
 		SignalLogTimer = 0.f;
 
 		UE_LOG(LogTemp, Warning,
-			TEXT("SIGNAL | Dist=%.1fm | Obstruction=%.2f | CTRL RSSI=%.0f LQ=%.0f | VIDEO=%.0f"),
+			TEXT("SIGNAL | Dist=%.1fm | Obstruction=%.2f | CTRL RSSI=%.0f LQ=%.0f | InputScale=%.2f | Failsafe=%d | VIDEO=%.0f"),
 			DistanceM,
 			Obstruction,
 			Telemetry.ControlRSSIPercent,
 			Telemetry.ControlLQPercent,
+			ControlInputScale,
+			bControlFailsafeActive ? 1 : 0,
 			Telemetry.VideoLinkPercent
 		);
 	}
@@ -673,6 +686,71 @@ void ADiplomaPawn::UpdateSignalTelemetry(float DeltaTime)
 			);
 		}
 	}
+}
+
+void ADiplomaPawn::UpdateReceivedControlInput()
+{
+	const float LQ = Telemetry.bControlLinkValid ? Telemetry.ControlLQPercent : 100.f;
+
+	if (LQ <= ControlFailsafeLQ)
+	{
+		ControlFailsafeTimer += LastDeltaSeconds;
+
+		if (ControlFailsafeTimer >= ControlFailsafeEnterDelay)
+		{
+			bControlFailsafeActive = true;
+		}
+	}
+	else
+	{
+		ControlFailsafeTimer = 0.f;
+
+		if (LQ >= ControlFailsafeRecoverLQ)
+		{
+			bControlFailsafeActive = false;
+		}
+	}
+
+	if (bControlFailsafeActive)
+	{
+		ControlInputScale = 0.f;
+
+		ReceivedThrottle = 0.f;
+		ReceivedPitchInput = 0.f;
+		ReceivedRollInput = 0.f;
+		ReceivedYawInput = 0.f;
+	}
+	else
+	{
+		if (LQ >= ControlDegradedLQ)
+		{
+			ControlInputScale = 1.f;
+		}
+		else if (LQ <= ControlCriticalLQ)
+		{
+			ControlInputScale = FMath::GetMappedRangeValueClamped(
+				FVector2D(ControlFailsafeLQ, ControlCriticalLQ),
+				FVector2D(ControlMinimumInputScale, ControlCriticalInputScale),
+				LQ
+			);
+		}
+		else
+		{
+			ControlInputScale = FMath::GetMappedRangeValueClamped(
+				FVector2D(ControlCriticalLQ, ControlDegradedLQ),
+				FVector2D(ControlCriticalInputScale, 1.f),
+				LQ
+			);
+		}
+
+		ReceivedThrottle = Throttle;
+		ReceivedPitchInput = PitchInput * ControlInputScale;
+		ReceivedRollInput = RollInput * ControlInputScale;
+		ReceivedYawInput = YawInput * ControlInputScale;
+	}
+
+	Telemetry.ControlInputScale = ControlInputScale;
+	Telemetry.bControlFailsafeActive = bControlFailsafeActive;
 }
 
 float ADiplomaPawn::ComputeOperatorObstructionFactor() const
