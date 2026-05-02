@@ -29,5 +29,29 @@ void ADiplomaHUD::DrawHUD()
 		return;
 	}
 
+	const bool bHideFPVHUD = Pawn->IsKillCamActive() || Pawn->IsCrashed();
+
+	FPVHUDWidget->SetVisibility(
+		bHideFPVHUD ? ESlateVisibility::Hidden : ESlateVisibility::Visible
+	);
+
+	if (bHideFPVHUD)
+	{
+		return;
+	}
+
 	FPVHUDWidget->ApplyTelemetry(Pawn->GetTelemetry());
 }
+
+//void ADiplomaHUD::DrawHUD()
+//{
+//	Super::DrawHUD();
+//
+//	ADiplomaPawn* Pawn = Cast<ADiplomaPawn>(GetOwningPawn());
+//	if (!Pawn || !FPVHUDWidget)
+//	{
+//		return;
+//	}
+//
+//	FPVHUDWidget->ApplyTelemetry(Pawn->GetTelemetry());
+//}

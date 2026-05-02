@@ -55,7 +55,7 @@ struct FDroneTelemetry
 	float FlightTimeSeconds = 0.f;
 
 	UPROPERTY(BlueprintReadOnly)
-	bool bArmed = true;
+	bool bArmed = false;
 
 	UPROPERTY(BlueprintReadOnly)
 	FString FlightMode;
@@ -110,6 +110,12 @@ struct FDroneTelemetry
 
 	UPROPERTY(BlueprintReadOnly)
 	bool bControlFailsafeActive = false;
+
+	UPROPERTY(BlueprintReadOnly)
+	bool bKillCamActive = false;
+
+	UPROPERTY(BlueprintReadOnly)
+	bool bCrashed = false;
 };
 
 UCLASS(Config=Game)
@@ -148,6 +154,9 @@ protected:
 	/** Camera component that will be our viewpoint */
 	UPROPERTY(Category = Camera, VisibleDefaultsOnly, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
 	class UCameraComponent* Camera;
+
+	bool bArmedState = false;
+	bool bBombArmedState = false;
 
 	//Telemetry
 	UPROPERTY(BlueprintReadOnly)
@@ -217,9 +226,23 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
 	float ControlFailsafeRecoverLQ = 25.f;
 
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlFailsafeHoldSeconds = 0.5f;
+
 	float ControlFailsafeTimer = 0.f;
+	float ControlFailsafeActiveTime = 0.f;
+
+	float LastValidReceivedThrottle = 0.f;
+	float LastValidReceivedPitchInput = 0.f;
+	float LastValidReceivedRollInput = 0.f;
+	float LastValidReceivedYawInput = 0.f;
+
+	virtual void ResetDroneStateAfterRespawn();
 
 	//Interference
+
+
+
 	
 
 	UPROPERTY()
@@ -228,7 +251,7 @@ protected:
 	void UpdateSignalTelemetry(float DeltaTime);
 	float ComputeOperatorObstructionFactor() const;
 
-	void UpdateReceivedControlInput();
+	void UpdateReceivedControlInput(float DeltaTime);
 
 	// Begin APawn overrides
 	virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override; // Allows binding actions/axes to functions
@@ -299,6 +322,9 @@ protected:
 		UPrimitiveComponent* OtherComp, FVector NormalImpulse,
 		const FHitResult& Hit);
 
+	void ToggleArm();
+	void ToggleBombArm();
+
 
 
 private:
@@ -316,4 +342,88 @@ public:
 	void ToggleMouseJoystick();
 	void CenterMouseCursor();
 	virtual void UpdateTelemetry();
+
+	bool IsArmed() const { return bArmedState; }
+	bool IsBombArmed() const { return bBombArmedState; }
+	bool IsKillCamActive() const { return bKillCamActive; }
+	bool IsCrashed() const { return bCrashed; }
+
+
+
+	// Kill camera
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+	bool bKillCamTrackDrone = false;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+	float KillCamRotationInterpSpeed = 12.f; 
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+	float KillCamDuration = 3.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+	float RespawnDelay = 2.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+	float KillCamDistance = 2000.f;
+
+	// ¬ибух Ч призначаЇтьс€ в блюпринт≥
+	UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+	class UParticleSystem* ExplosionEffect = nullptr;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+	float CrashSpawnGraceSeconds = 1.0f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+	float CrashMinImpactSpeedMps = 8.0f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+	float CrashMinNormalImpulse = 25000.0f;
+
+	float LastSpawnWorldTime = 0.f;
+
+	bool ShouldIgnoreCrashHit(const FVector& NormalImpulse) const;
+
+private:
+	bool bKillCamActive = false;
+	float KillCamTimer = 0.f;
+	FVector CrashLocation;
+	FVector KillCamLocation;
+
+	class UCameraComponent* KillCamCamera = nullptr;
+	struct FKillCamFrame
+	{
+		float Time = 0.f;
+		FVector Location = FVector::ZeroVector;
+		FQuat Rotation = FQuat::Identity;
+	};
+
+	TArray<FKillCamFrame> KillCamFrames;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+	float KillCamReplaySeconds = 1.0f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+	float KillCamCameraHeight = 500.f;
+
+	float KillCamReplayTime = 0.f;
+	float KillCamReplayDuration = 0.f;
+	float KillCamReplayStartWorldTime = 0.f;
+	float KillCamReplayEndWorldTime = 0.f;
+
+	bool bKillCamExplosionPending = false;
+	bool bKillCamExplosionSpawned = false;
+
+	void RecordKillCamFrame();
+	void UpdateKillCamReplay(float DeltaSeconds);
+	FTransform SampleKillCamTransform(float WorldTime) const;
+	void HandleCrash(const FVector& HitLocation);
+	void SpawnCrashExplosion(const FVector& HitLocation);
+
+
+	void StartKillCam(const FVector& HitLocation);
+	void EndKillCam();
+	void FindKillCamPosition(const FVector& HitLocation);
+
+	
 };

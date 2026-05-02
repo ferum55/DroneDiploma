@@ -8,6 +8,7 @@
 
 void UFPVHUDWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 {
+	//SetVisibility(InTelemetry.bKillCamActive ? ESlateVisibility::Hidden : ESlateVisibility::Visible);
 	if (Text_PrimaryLink)
 	{
 		if (InTelemetry.bControlLinkValid)

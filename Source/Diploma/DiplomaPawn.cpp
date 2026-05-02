@@ -18,6 +18,8 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/EngineTypes.h"
 
+#include "Particles/ParticleSystemComponent.h"
+#include "Kismet/GameplayStatics.h"
 
 
 ADiplomaPawn::ADiplomaPawn()
@@ -39,7 +41,9 @@ ADiplomaPawn::ADiplomaPawn()
 	PlaneMesh->SetStaticMesh(ConstructorStatics.PlaneMesh.Get());	// Set static mesh
 	RootComponent = PlaneMesh;
 
-	//PlaneMesh->SetNotifyRigidBodyCollision(true);
+	//Unsafe
+	PlaneMesh->SetNotifyRigidBodyCollision(true);
+
 	PlaneMesh->SetSimulatePhysics(true);
 	PlaneMesh->SetEnableGravity(true);
 	//PlaneMesh->SetLinearDamping(0.05f);
@@ -60,6 +64,11 @@ ADiplomaPawn::ADiplomaPawn()
 	Camera->SetRelativeRotation(FRotator::ZeroRotator);
 	Camera->FieldOfView = 100.f;
 	Camera->SetRelativeLocation(FVector(0.f, 0.f, 0.f));
+
+	KillCamCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("KillCamCamera0"));
+	KillCamCamera->SetupAttachment(RootComponent);
+	KillCamCamera->bUsePawnControlRotation = false;
+	KillCamCamera->SetActive(false);
 
 	if (Camera)
 	{
@@ -99,6 +108,12 @@ ADiplomaPawn::ADiplomaPawn()
 void ADiplomaPawn::BeginPlay()
 {
 	Super::BeginPlay();
+	if (GEngine)
+	{
+		GEngine->Exec(GetWorld(), TEXT("stat fps"));
+		GEngine->Exec(GetWorld(), TEXT("stat unit"));
+	}
+
 	BaroZeroZ = GetActorLocation().Z;
 	OperatorLocation = GetActorLocation();
 	
@@ -107,6 +122,7 @@ void ADiplomaPawn::BeginPlay()
 
 	SpawnLocation = GetActorLocation();
 	SpawnRotation = GetActorRotation();
+	LastSpawnWorldTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
 	PlaneMesh->OnComponentHit.AddDynamic(this, &ADiplomaPawn::OnHit);
 
 	UE_LOG(LogTemp, Warning, TEXT("Actor: %s"), *GetName());
@@ -189,19 +205,20 @@ void ADiplomaPawn::BeginPlay()
 void ADiplomaPawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
 	if (bCrashed)
 	{
-		CrashTimer -= DeltaSeconds;
-		if (CrashTimer <= 0.f)
+		if (bKillCamActive)
 		{
-			bCrashed = false;
-			PlaneMesh->SetSimulatePhysics(true);
-			/*UE_LOG(LogTemp, Warning, TEXT("Respawned! Control restored."));*/
+			UpdateKillCamReplay(DeltaSeconds);
 		}
 		return;
 	}
+
+	RecordKillCamFrame();
+
 	UpdateMouseJoystick();
-	/*UpdateTelemetry();*/
+
 	float RawThrottle = GetInputAxisValue(TEXT("TestAxis4"));
 	float RawPitch = GetInputAxisValue(TEXT("TestAxis5"));
 	float RawRoll = GetInputAxisValue(TEXT("TestAxis3"));
@@ -212,64 +229,47 @@ void ADiplomaPawn::Tick(float DeltaSeconds)
 	float NormRoll = NormalizeCenteredAxis(RawRoll);
 	float NormYaw = NormalizeCenteredAxis(RawYaw);
 	LastDeltaSeconds = DeltaSeconds;
-
-	/*UE_LOG(LogTemp, Warning,
-		TEXT("RAW  T=%.3f P=%.3f R=%.3f Y=%.3f | NORM  T=%.3f P=%.3f R=%.3f Y=%.3f"),
-		RawThrottle, RawPitch, RawRoll, RawYaw,
-		NormThrottle, NormPitch, NormRoll, NormYaw
-	);*/
-
-	//UE_LOG(LogTemp, Warning, TEXT("RAW=%.3f NORM=%.3f"), RawYaw, NormYaw);
 }
 
-void ADiplomaPawn::NotifyHit(class UPrimitiveComponent* MyComp, class AActor* Other, class UPrimitiveComponent* OtherComp, bool bSelfMoved, FVector HitLocation, FVector HitNormal, FVector NormalImpulse, const FHitResult& Hit)
+void ADiplomaPawn::NotifyHit(UPrimitiveComponent* MyComp, AActor* Other,
+	UPrimitiveComponent* OtherComp, bool bSelfMoved,
+	FVector HitLocation, FVector HitNormal,
+	FVector NormalImpulse, const FHitResult& Hit)
 {
-	UE_LOG(LogTemp, Warning, TEXT("CRASH! Hit actor: %s at location: %s"),
-		Other ? *Other->GetName() : TEXT("Unknown"),
-		*HitLocation.ToString());
-	Super::NotifyHit(MyComp, Other, OtherComp, bSelfMoved, HitLocation, HitNormal, NormalImpulse, Hit);
+	Super::NotifyHit(MyComp, Other, OtherComp, bSelfMoved,
+		HitLocation, HitNormal, NormalImpulse, Hit);
 
+	if (ShouldIgnoreCrashHit(NormalImpulse))
+	{
+		return;
+	}
 
-	FRotator CurrentRotation = GetActorRotation();
-	SetActorRotation(FQuat::Slerp(CurrentRotation.Quaternion(), HitNormal.ToOrientationQuat(), 0.025f));
+	UE_LOG(LogTemp, Warning, TEXT("CRASH NOTIFY HIT | Other=%s | Location=%s | Impulse=%s"),
+		Other ? *Other->GetName() : TEXT("None"),
+		*HitLocation.ToString(),
+		*NormalImpulse.ToString()
+	);
 
-	if (bCrashed) return; 
-
-	bCrashed = true;
-	CrashTimer = CrashRespawnDelay;
-
-	UE_LOG(LogTemp, Warning, TEXT("CRASH! Hit actor: %s at location: %s"),
-		Other ? *Other->GetName() : TEXT("Unknown"),
-		*HitLocation.ToString());
-
-	// Зупиняємо фізику
-	PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
-	PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
-
-	// Телепортуємо
-	SetActorLocation(SpawnLocation);
-	SetActorRotation(SpawnRotation);
+	HandleCrash(HitLocation);
 }
 
 void ADiplomaPawn::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
-	//if (bCrashed) return;
+	const FVector HitLocation = Hit.ImpactPoint.IsNearlyZero() ? Hit.Location : Hit.ImpactPoint;
 
-	//bCrashed = true;
-	//CrashTimer = CrashRespawnDelay;
+	if (ShouldIgnoreCrashHit(NormalImpulse))
+	{
+		return;
+	}
 
-	//UE_LOG(LogTemp, Warning, TEXT("CRASH! Hit: %s | Impulse: %.1f"),
-	//	OtherActor ? *OtherActor->GetName() : TEXT("Unknown"),
-	//	NormalImpulse.Size());
+	UE_LOG(LogTemp, Warning, TEXT("CRASH COMPONENT HIT | Other=%s | Impulse=%s | ImpactPoint=%s"),
+		OtherActor ? *OtherActor->GetName() : TEXT("None"),
+		*NormalImpulse.ToString(),
+		*HitLocation.ToString()
+	);
 
-	//PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
-	//PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
-	//SetActorLocation(SpawnLocation);
-	//SetActorRotation(SpawnRotation);
-
-	//// Вимикаємо фізику на час таймера
-	//PlaneMesh->SetSimulatePhysics(false);
+	HandleCrash(HitLocation);
 }
 
 
@@ -290,6 +290,9 @@ void ADiplomaPawn::SetupPlayerInputComponent(class UInputComponent* PlayerInputC
 		&ADiplomaPawn::ToggleMouseJoystick
 	);
 
+	PlayerInputComponent->BindAction("Arm", IE_Pressed, this, &ADiplomaPawn::ToggleArm);
+	PlayerInputComponent->BindAction("BombArm", IE_Pressed, this, &ADiplomaPawn::ToggleBombArm);
+
 
 	PlayerInputComponent->BindAxis("TestAxis1");
 	PlayerInputComponent->BindAxis("TestAxis2");
@@ -299,8 +302,42 @@ void ADiplomaPawn::SetupPlayerInputComponent(class UInputComponent* PlayerInputC
 	PlayerInputComponent->BindAxis("TestAxis6");
 	PlayerInputComponent->BindAxis("TestAxis7");
 	PlayerInputComponent->BindAxis("TestAxis8");
+
+
 }
 
+void ADiplomaPawn::ToggleArm()
+{
+	if (bCrashed || bKillCamActive)
+	{
+		return;
+	}
+
+	bArmedState = !bArmedState;
+
+	if (!bArmedState)
+	{
+		Throttle = 0.f;
+		ReceivedThrottle = 0.f;
+		ReceivedPitchInput = 0.f;
+		ReceivedRollInput = 0.f;
+		ReceivedYawInput = 0.f;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("Armed: %d"), bArmedState ? 1 : 0);
+}
+
+void ADiplomaPawn::ToggleBombArm()
+{
+	if (bCrashed || bKillCamActive)
+	{
+		return;
+	}
+
+	bBombArmedState = !bBombArmedState;
+
+	UE_LOG(LogTemp, Warning, TEXT("BombArmed: %d"), bBombArmedState ? 1 : 0);
+}
 
 
 void ADiplomaPawn::PitchInputAxis(float Value)
@@ -455,7 +492,7 @@ void ADiplomaPawn::UpdateTelemetry()
 		? (GetWorld()->GetTimeSeconds() - TelemetryStartTimeSeconds)
 		: 0.f;
 
-	Telemetry.bArmed = true;
+	Telemetry.bArmed = bArmedState;
 	Telemetry.FlightMode = TEXT("");
 
 	Telemetry.PackVoltage = 0.f;
@@ -473,7 +510,10 @@ void ADiplomaPawn::UpdateTelemetry()
 	Telemetry.TxPowerW = 0.f;
 	Telemetry.bTxPowerValid = false;
 
-	Telemetry.bBombArmed = false;
+	Telemetry.bBombArmed = bBombArmedState;
+	Telemetry.bKillCamActive = bKillCamActive;
+	Telemetry.bCrashed = bCrashed;
+
 	UpdateSignalTelemetry(LastDeltaSeconds);
 }
 
@@ -506,54 +546,27 @@ float ADiplomaPawn::GetRadioAltitudeMeters(bool& bValid) const
 
 float ADiplomaPawn::NormalizeThrottle(float Raw) const
 {
-	float Shifted = Raw;
-
-	if (Raw > 0.5f)
-	{
-		Shifted = Raw - 1.0f;
-	}
-
-	float Value = Shifted + 0.5f;
-
+	// Axis4: мінімум=0.0, центр=0.5, максимум=1.0
+	// Мапимо [0..1] ? [0..1], центр не має значення для тяги
 	const float Min = 0.15f;
 	const float Max = 0.85f;
-
-	Value = (Value - Min) / (Max - Min);
-
+	float Value = (Raw - Min) / (Max - Min);
 	Value = FMath::Clamp(Value, 0.f, 1.f);
-
-	if (Value < 0.02f)
-	{
-		Value = 0.f;
-	}
-
+	if (Value < 0.02f) Value = 0.f;
 	return Value;
 }
 
 float ADiplomaPawn::NormalizeCenteredAxis(float Raw) const
 {
-	float Shifted = Raw;
-
-	if (Raw > 0.5f)
-	{
-		Shifted = Raw - 1.0f;
-	}
-
-	float Value = Shifted;
-
-	const float MaxAbs = 0.35f;
-	Value = Value / MaxAbs;
+	// Axis: мінімум=0.0, центр=0.5, максимум=1.0
+	// Мапимо [0..1] ? [-1..1] відносно центру 0.5
+	float Value = (Raw - 0.5f) * 2.0f;
 	Value = FMath::Clamp(Value, -1.f, 1.f);
-
-	const float DeadZone = 0.02f;
-
-	if (FMath::Abs(Value) < DeadZone)
-	{
-		Value = 0.f;
-	}
-
+	const float DeadZone = 0.04f;
+	if (FMath::Abs(Value) < DeadZone) Value = 0.f;
 	return Value;
 }
+
 void ADiplomaPawn::UpdateSignalTelemetry(float DeltaTime)
 {
 	if (!PlaneMesh)
@@ -648,7 +661,7 @@ void ADiplomaPawn::UpdateSignalTelemetry(float DeltaTime)
 	Telemetry.VideoLinkPercent = SmoothedVideoLink;
 	Telemetry.bVideoLinkValid = true;
 
-	UpdateReceivedControlInput();
+	UpdateReceivedControlInput(DeltaTime);
 
 	static float SignalLogTimer = 0.f;
 	SignalLogTimer += DeltaTime;
@@ -657,16 +670,17 @@ void ADiplomaPawn::UpdateSignalTelemetry(float DeltaTime)
 	{
 		SignalLogTimer = 0.f;
 
-		UE_LOG(LogTemp, Warning,
-			TEXT("SIGNAL | Dist=%.1fm | Obstruction=%.2f | CTRL RSSI=%.0f LQ=%.0f | InputScale=%.2f | Failsafe=%d | VIDEO=%.0f"),
+		/*UE_LOG(LogTemp, Warning,
+			TEXT("SIGNAL | Dist=%.1fm | Obstruction=%.2f | CTRL RSSI=%.0f LQ=%.0f | InputScale=%.2f | Failsafe=%d | FSTime=%.2f | VIDEO=%.0f"),
 			DistanceM,
 			Obstruction,
 			Telemetry.ControlRSSIPercent,
 			Telemetry.ControlLQPercent,
 			ControlInputScale,
 			bControlFailsafeActive ? 1 : 0,
+			ControlFailsafeActiveTime,
 			Telemetry.VideoLinkPercent
-		);
+		);*/
 	}
 	if (FPVPostProcessMID)
 	{
@@ -679,35 +693,46 @@ void ADiplomaPawn::UpdateSignalTelemetry(float DeltaTime)
 		{
 			PPLogTimer = 0.f;
 
-			UE_LOG(LogTemp, Warning,
+			/*UE_LOG(LogTemp, Warning,
 				TEXT("PP | VideoQuality01=%.2f | MID=%s"),
 				VideoQuality01,
 				FPVPostProcessMID ? TEXT("YES") : TEXT("NO")
-			);
+			);*/
 		}
 	}
 }
 
-void ADiplomaPawn::UpdateReceivedControlInput()
+void ADiplomaPawn::UpdateReceivedControlInput(float DeltaTime)
 {
+	const float SafeDeltaTime = FMath::Max(DeltaTime, 0.f);
 	const float LQ = Telemetry.bControlLinkValid ? Telemetry.ControlLQPercent : 100.f;
 
-	if (LQ <= ControlFailsafeLQ)
+	if (!bControlFailsafeActive)
 	{
-		ControlFailsafeTimer += LastDeltaSeconds;
-
-		if (ControlFailsafeTimer >= ControlFailsafeEnterDelay)
+		if (LQ <= ControlFailsafeLQ)
 		{
-			bControlFailsafeActive = true;
+			ControlFailsafeTimer += SafeDeltaTime;
+
+			if (ControlFailsafeTimer >= ControlFailsafeEnterDelay)
+			{
+				bControlFailsafeActive = true;
+				ControlFailsafeActiveTime = 0.f;
+			}
+		}
+		else
+		{
+			ControlFailsafeTimer = 0.f;
 		}
 	}
 	else
 	{
-		ControlFailsafeTimer = 0.f;
+		ControlFailsafeActiveTime += SafeDeltaTime;
 
 		if (LQ >= ControlFailsafeRecoverLQ)
 		{
 			bControlFailsafeActive = false;
+			ControlFailsafeTimer = 0.f;
+			ControlFailsafeActiveTime = 0.f;
 		}
 	}
 
@@ -715,10 +740,20 @@ void ADiplomaPawn::UpdateReceivedControlInput()
 	{
 		ControlInputScale = 0.f;
 
-		ReceivedThrottle = 0.f;
-		ReceivedPitchInput = 0.f;
-		ReceivedRollInput = 0.f;
-		ReceivedYawInput = 0.f;
+		if (ControlFailsafeActiveTime < ControlFailsafeHoldSeconds)
+		{
+			ReceivedThrottle = LastValidReceivedThrottle;
+			ReceivedPitchInput = LastValidReceivedPitchInput;
+			ReceivedRollInput = LastValidReceivedRollInput;
+			ReceivedYawInput = LastValidReceivedYawInput;
+		}
+		else
+		{
+			ReceivedThrottle = 0.f;
+			ReceivedPitchInput = 0.f;
+			ReceivedRollInput = 0.f;
+			ReceivedYawInput = 0.f;
+		}
 	}
 	else
 	{
@@ -747,6 +782,11 @@ void ADiplomaPawn::UpdateReceivedControlInput()
 		ReceivedPitchInput = PitchInput * ControlInputScale;
 		ReceivedRollInput = RollInput * ControlInputScale;
 		ReceivedYawInput = YawInput * ControlInputScale;
+
+		LastValidReceivedThrottle = ReceivedThrottle;
+		LastValidReceivedPitchInput = ReceivedPitchInput;
+		LastValidReceivedRollInput = ReceivedRollInput;
+		LastValidReceivedYawInput = ReceivedYawInput;
 	}
 
 	Telemetry.ControlInputScale = ControlInputScale;
@@ -805,4 +845,470 @@ float ADiplomaPawn::ComputeOperatorObstructionFactor() const
 	const float RawObstruction = static_cast<float>(BlockedCount) / static_cast<float>(Offsets.Num());
 
 	return FMath::Clamp(RawObstruction, 0.f, 1.f);
+}
+
+void ADiplomaPawn::FindKillCamPosition(const FVector& HitLocation)
+{
+	if (!GetWorld()) return;
+
+	// Пробуємо 8 напрямків навколо точки зіткнення
+	const TArray<FVector> Directions = {
+		FVector(1, 0, 0), FVector(-1, 0, 0),
+		FVector(0, 1, 0), FVector(0, -1, 0),
+		FVector(1, 1, 0).GetSafeNormal(),
+		FVector(-1, 1, 0).GetSafeNormal(),
+		FVector(1, -1, 0).GetSafeNormal(),
+		FVector(-1,-1, 0).GetSafeNormal()
+	};
+
+	FCollisionQueryParams Params;
+	Params.AddIgnoredActor(this);
+
+	FVector BestPos = HitLocation + FVector(0, 0, KillCamDistance);
+	float BestDot = -1.f;
+
+	// Беремо вектор польоту дрона до зіткнення
+	const FVector DroneForward = GetActorForwardVector();
+
+	for (const FVector& Dir : Directions)
+	{
+		// Камера збоку-ззаду, трохи вище
+		const FVector Offset = Dir * KillCamDistance + FVector(0, 0, KillCamDistance * 0.5f);
+		const FVector CandidatePos = HitLocation + Offset;
+
+		FHitResult TraceHit;
+		const bool bBlocked = GetWorld()->LineTraceSingleByChannel(
+			TraceHit, HitLocation, CandidatePos,
+			ECC_Visibility, Params
+		);
+
+		if (!bBlocked)
+		{
+			// Перевагу даємо напрямку збоку від вектора польоту
+			const float Dot = FMath::Abs(FVector::DotProduct(Dir, DroneForward));
+			// Dot ~0 = перпендикулярно до польоту = добре видно
+			const float Score = 1.f - Dot;
+			if (Score > BestDot)
+			{
+				BestDot = Score;
+				BestPos = CandidatePos;
+			}
+		}
+	}
+
+	KillCamLocation = BestPos;
+}
+
+void ADiplomaPawn::StartKillCam(const FVector& HitLocation)
+{
+	if (!GetWorld() || !PlaneMesh || !Camera || !KillCamCamera)
+	{
+		return;
+	}
+
+	const float Now = GetWorld()->GetTimeSeconds();
+
+	FKillCamFrame ImpactFrame;
+	ImpactFrame.Time = Now;
+	ImpactFrame.Location = PlaneMesh->GetComponentLocation();
+	ImpactFrame.Rotation = PlaneMesh->GetComponentQuat();
+	KillCamFrames.Add(ImpactFrame);
+
+	if (KillCamFrames.Num() < 2)
+	{
+		KillCamReplayStartWorldTime = Now;
+		KillCamReplayEndWorldTime = Now;
+		KillCamReplayDuration = 0.1f;
+	}
+	else
+	{
+		KillCamReplayEndWorldTime = Now;
+		KillCamReplayStartWorldTime = FMath::Max(KillCamFrames[0].Time, Now - KillCamReplaySeconds);
+		KillCamReplayDuration = FMath::Max(KillCamReplayEndWorldTime - KillCamReplayStartWorldTime, 0.1f);
+	}
+
+	KillCamReplayTime = 0.f;
+	KillCamTimer = KillCamDuration;
+
+	const FTransform StartTransform = SampleKillCamTransform(KillCamReplayStartWorldTime);
+	const FVector ReplayStartLocation = StartTransform.GetLocation();
+	const FVector ReplayEndLocation = HitLocation;
+	const FVector MidLocation = (ReplayStartLocation + ReplayEndLocation) * 0.5f;
+
+	FVector FlightDirection = (ReplayEndLocation - ReplayStartLocation).GetSafeNormal();
+
+	if (FlightDirection.IsNearlyZero())
+	{
+		FlightDirection = GetActorForwardVector();
+	}
+
+	FVector Side = FVector::CrossProduct(FlightDirection, FVector::UpVector).GetSafeNormal();
+
+	if (Side.IsNearlyZero())
+	{
+		Side = GetActorRightVector();
+	}
+
+	TArray<FVector> CandidateDirections;
+	CandidateDirections.Add(Side);
+	CandidateDirections.Add(-Side);
+	CandidateDirections.Add((Side + FlightDirection * -0.35f).GetSafeNormal());
+	CandidateDirections.Add((-Side + FlightDirection * -0.35f).GetSafeNormal());
+	CandidateDirections.Add((Side + FlightDirection * 0.35f).GetSafeNormal());
+	CandidateDirections.Add((-Side + FlightDirection * 0.35f).GetSafeNormal());
+
+	FCollisionQueryParams Params;
+	Params.AddIgnoredActor(this);
+
+	FVector BestCameraLocation = MidLocation + Side * KillCamDistance + FVector(0.f, 0.f, KillCamCameraHeight);
+	float BestScore = -1.f;
+
+	for (const FVector& Dir : CandidateDirections)
+	{
+		const FVector CandidateLocation = MidLocation + Dir * KillCamDistance + FVector(0.f, 0.f, KillCamCameraHeight);
+
+		FHitResult HitToMid;
+		FHitResult HitToImpact;
+
+		const bool bBlockedMid = GetWorld()->LineTraceSingleByChannel(
+			HitToMid,
+			CandidateLocation,
+			MidLocation,
+			ECC_Visibility,
+			Params
+		);
+
+		const bool bBlockedImpact = GetWorld()->LineTraceSingleByChannel(
+			HitToImpact,
+			CandidateLocation,
+			ReplayEndLocation,
+			ECC_Visibility,
+			Params
+		);
+
+		float Score = 0.f;
+
+		if (!bBlockedMid)
+		{
+			Score += 1.f;
+		}
+
+		if (!bBlockedImpact)
+		{
+			Score += 1.f;
+		}
+
+		Score += FVector::DotProduct(Dir, Side) * 0.2f;
+
+		if (Score > BestScore)
+		{
+			BestScore = Score;
+			BestCameraLocation = CandidateLocation;
+		}
+	}
+
+	KillCamLocation = BestCameraLocation;
+
+	KillCamCamera->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+	
+	const FVector InitialLookTarget = bKillCamTrackDrone ? ReplayStartLocation : HitLocation;
+
+	KillCamCamera->SetWorldLocation(KillCamLocation);
+	KillCamCamera->SetWorldRotation(
+		(InitialLookTarget - KillCamLocation).GetSafeNormal().ToOrientationRotator()
+	);
+	KillCamCamera->SetActive(true);
+	Camera->SetActive(false);
+
+	PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+	PlaneMesh->SetSimulatePhysics(false);
+	PlaneMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PlaneMesh->SetVisibility(true);
+
+	PlaneMesh->SetWorldLocationAndRotation(
+		StartTransform.GetLocation(),
+		StartTransform.GetRotation(),
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics
+	);
+
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		PC->SetViewTarget(this);
+	}
+
+	bKillCamActive = true;
+}
+
+void ADiplomaPawn::EndKillCam()
+{
+	bKillCamActive = false;
+	KillCamCamera->SetActive(false);
+	Camera->SetActive(true);
+
+	PlaneMesh->SetVisibility(true);
+	PlaneMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	PlaneMesh->SetSimulatePhysics(true);
+
+	SetActorLocation(SpawnLocation);
+	SetActorRotation(SpawnRotation);
+
+	PlaneMesh->SetWorldLocationAndRotation(
+		SpawnLocation,
+		SpawnRotation,
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics
+	);
+
+	PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+
+	LastSpawnWorldTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+
+	bCrashed = false;
+	CrashTimer = CrashRespawnDelay;
+	KillCamReplayTime = 0.f;
+	KillCamReplayDuration = 0.f;
+	KillCamFrames.Empty();
+
+	ResetDroneStateAfterRespawn();
+}
+void ADiplomaPawn::RecordKillCamFrame()
+{
+	if (!GetWorld() || !PlaneMesh)
+	{
+		return;
+	}
+
+	const float Now = GetWorld()->GetTimeSeconds();
+
+	FKillCamFrame Frame;
+	Frame.Time = Now;
+	Frame.Location = PlaneMesh->GetComponentLocation();
+	Frame.Rotation = PlaneMesh->GetComponentQuat();
+
+	KillCamFrames.Add(Frame);
+
+	const float KeepSeconds = KillCamReplaySeconds + 0.3f;
+
+	while (KillCamFrames.Num() > 1 && Now - KillCamFrames[0].Time > KeepSeconds)
+	{
+		KillCamFrames.RemoveAt(0);
+	}
+}
+
+FTransform ADiplomaPawn::SampleKillCamTransform(float WorldTime) const
+{
+	if (KillCamFrames.Num() == 0)
+	{
+		return PlaneMesh ? PlaneMesh->GetComponentTransform() : FTransform::Identity;
+	}
+
+	if (WorldTime <= KillCamFrames[0].Time)
+	{
+		return FTransform(KillCamFrames[0].Rotation, KillCamFrames[0].Location, FVector(1.f));
+	}
+
+	const int32 LastIndex = KillCamFrames.Num() - 1;
+
+	if (WorldTime >= KillCamFrames[LastIndex].Time)
+	{
+		return FTransform(KillCamFrames[LastIndex].Rotation, KillCamFrames[LastIndex].Location, FVector(1.f));
+	}
+
+	for (int32 i = 0; i < LastIndex; ++i)
+	{
+		const FKillCamFrame& A = KillCamFrames[i];
+		const FKillCamFrame& B = KillCamFrames[i + 1];
+
+		if (WorldTime >= A.Time && WorldTime <= B.Time)
+		{
+			const float Alpha = (WorldTime - A.Time) / FMath::Max(B.Time - A.Time, KINDA_SMALL_NUMBER);
+			const FVector Location = FMath::Lerp(A.Location, B.Location, Alpha);
+			const FQuat Rotation = FQuat::Slerp(A.Rotation, B.Rotation, Alpha).GetNormalized();
+
+			return FTransform(Rotation, Location, FVector(1.f));
+		}
+	}
+
+	return FTransform(KillCamFrames[LastIndex].Rotation, KillCamFrames[LastIndex].Location, FVector(1.f));
+}
+
+void ADiplomaPawn::HandleCrash(const FVector& HitLocation)
+{
+	if (bCrashed)
+	{
+		return;
+	}
+
+	bCrashed = true;
+	CrashLocation = HitLocation;
+	bKillCamExplosionPending = bBombArmedState;
+	bKillCamExplosionSpawned = false;
+
+	StartKillCam(HitLocation);
+}
+
+void ADiplomaPawn::SpawnCrashExplosion(const FVector& HitLocation)
+{
+	if (!ExplosionEffect || !GetWorld())
+	{
+		return;
+	}
+
+	UGameplayStatics::SpawnEmitterAtLocation(
+		GetWorld(),
+		ExplosionEffect,
+		HitLocation,
+		FRotator::ZeroRotator,
+		FVector(1.f)
+	);
+}
+
+void ADiplomaPawn::UpdateKillCamReplay(float DeltaSeconds)
+{
+	if (!PlaneMesh)
+	{
+		EndKillCam();
+		return;
+	}
+
+	KillCamReplayTime += DeltaSeconds;
+
+	const float Alpha = FMath::Clamp(
+		KillCamReplayTime / FMath::Max(KillCamReplayDuration, KINDA_SMALL_NUMBER),
+		0.f,
+		1.f
+	);
+
+	const float ReplayWorldTime = FMath::Lerp(
+		KillCamReplayStartWorldTime,
+		KillCamReplayEndWorldTime,
+		Alpha
+	);
+
+	const FTransform ReplayTransform = SampleKillCamTransform(ReplayWorldTime);
+
+	PlaneMesh->SetWorldLocationAndRotation(
+		ReplayTransform.GetLocation(),
+		ReplayTransform.GetRotation(),
+		false,
+		nullptr,
+		ETeleportType::TeleportPhysics
+	);
+
+	if (KillCamCamera)
+	{
+		const FVector LookTarget = bKillCamTrackDrone
+			? ReplayTransform.GetLocation()
+			: CrashLocation;
+
+		const FRotator TargetRotation =
+			(LookTarget - KillCamCamera->GetComponentLocation()).GetSafeNormal().ToOrientationRotator();
+
+		const FRotator NewRotation = FMath::RInterpTo(
+			KillCamCamera->GetComponentRotation(),
+			TargetRotation,
+			DeltaSeconds,
+			KillCamRotationInterpSpeed
+		);
+
+		KillCamCamera->SetWorldRotation(NewRotation);
+	}
+
+
+	if (Alpha >= 1.f)
+	{
+		if (bKillCamExplosionPending && !bKillCamExplosionSpawned)
+		{
+			bKillCamExplosionSpawned = true;
+			SpawnCrashExplosion(CrashLocation);
+		}
+
+		KillCamTimer -= DeltaSeconds;
+
+		if (KillCamTimer <= 0.f)
+		{
+			EndKillCam();
+		}
+	}
+}
+bool ADiplomaPawn::ShouldIgnoreCrashHit(const FVector& NormalImpulse) const
+{
+	if (!GetWorld() || !PlaneMesh)
+	{
+		return true;
+	}
+
+	const float Now = GetWorld()->GetTimeSeconds();
+	const float TimeSinceSpawn = Now - LastSpawnWorldTime;
+
+	const float SpeedMps = PlaneMesh->GetPhysicsLinearVelocity().Size() / 100.f;
+	const float ImpulseSize = NormalImpulse.Size();
+
+	if (TimeSinceSpawn < CrashSpawnGraceSeconds)
+	{
+		/*UE_LOG(LogTemp, Warning, TEXT("CRASH IGNORED | SpawnGrace=%.2f | Speed=%.2f m/s | Impulse=%.0f"),
+			TimeSinceSpawn,
+			SpeedMps,
+			ImpulseSize
+		);*/
+
+		return true;
+	}
+
+	if (SpeedMps < CrashMinImpactSpeedMps && ImpulseSize < CrashMinNormalImpulse)
+	{
+		/*UE_LOG(LogTemp, Warning, TEXT("CRASH IGNORED | WeakHit | Speed=%.2f m/s | Impulse=%.0f"),
+			SpeedMps,
+			ImpulseSize
+		);*/
+
+		return true;
+	}
+
+	return false;
+}
+
+void ADiplomaPawn::ResetDroneStateAfterRespawn()
+{
+	Throttle = 0.f;
+	PitchInput = 0.f;
+	RollInput = 0.f;
+	YawInput = 0.f;
+
+	ReceivedThrottle = 0.f;
+	ReceivedPitchInput = 0.f;
+	ReceivedRollInput = 0.f;
+	ReceivedYawInput = 0.f;
+
+	LastValidReceivedThrottle = 0.f;
+	LastValidReceivedPitchInput = 0.f;
+	LastValidReceivedRollInput = 0.f;
+	LastValidReceivedYawInput = 0.f;
+
+	ControlInputScale = 1.f;
+	bControlFailsafeActive = false;
+	ControlFailsafeTimer = 0.f;
+	ControlFailsafeActiveTime = 0.f;
+
+	SmoothedControlRSSI = 100.f;
+	SmoothedControlLQ = 100.f;
+	SmoothedVideoLink = 100.f;
+
+	bArmedState = false;
+	bBombArmedState = false;
+
+	bMouseJoystickEnabled = false;
+	AccumulatedX = 0.f;
+	AccumulatedY = 0.f;
+
+	BaroZeroZ = GetActorLocation().Z;
+	TelemetryStartTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+
+	Telemetry = FDroneTelemetry();
+	UpdateTelemetry();
 }

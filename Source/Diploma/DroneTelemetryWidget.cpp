@@ -55,21 +55,27 @@ void UDroneTelemetryWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 
 void UDroneTelemetryWidget::ApplyAxisValues(const TArray<float>& AxisValues)
 {
+	// AxisValues[0] = NormThrottle (вже [0..1])
+	// AxisValues[1] = NormPitch   ([-1..1])
+	// AxisValues[2] = NormRoll    ([-1..1])
+	// AxisValues[3] = NormYaw     ([-1..1])
+
+	if (BarThrottle && AxisValues.IsValidIndex(0))
+	{
+		BarThrottle->SetPercent(FMath::Clamp(AxisValues[0], 0.f, 1.f));
+	}
 	if (BarPitch && AxisValues.IsValidIndex(1))
 	{
-		BarPitch->SetPercent(FMath::Clamp(AxisValues[1], 0.f, 1.f));
+		// Конвертуємо [-1..1] ? [0..1] для прогрес бара
+		BarPitch->SetPercent(FMath::Clamp(AxisValues[1] * 0.5f + 0.5f, 0.f, 1.f));
 	}
-
-	// 2 - Roll
 	if (BarRoll && AxisValues.IsValidIndex(2))
 	{
-		BarRoll->SetPercent(FMath::Clamp(AxisValues[2], 0.f, 1.f));
+		BarRoll->SetPercent(FMath::Clamp(AxisValues[2] * 0.5f + 0.5f, 0.f, 1.f));
 	}
-
-	// 3 - Yaw
 	if (BarYaw && AxisValues.IsValidIndex(3))
 	{
-		BarYaw->SetPercent(FMath::Clamp(AxisValues[3], 0.f, 1.f));
+		BarYaw->SetPercent(FMath::Clamp(AxisValues[3] * 0.5f + 0.5f, 0.f, 1.f));
 	}
 }
 

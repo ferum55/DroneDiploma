@@ -109,10 +109,11 @@ protected:
     virtual void ApplyThrust() override;
     virtual void ApplyTorques() override;
     virtual void UpdateTelemetry() override;
+    virtual void ResetDroneStateAfterRespawn() override;
 
 private:
 
-    //Drag
+
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
     float AirDensity = 1.225f;
 
@@ -123,25 +124,25 @@ private:
     float CdLateral = 2.5f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float CdVertical = 1.5f;
+    float CdVertical = 2.4f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
     float AreaForward = 0.003916f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float AreaLateral = 0.013713f;
+    float AreaLateral = 0.013811f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float AreaVertical = 0.053621f;
+    float AreaVertical = 0.053622f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
     float RotorDiscDiameterM = 0.254f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float RotorVerticalAreaFactor = 1.f;
+    float RotorVerticalAreaFactor = 0.2f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float RotorVerticalCd = 2.f;
+    float RotorVerticalCd = 1.2f;
 
     // Мотори: FL, FR, BL, BR
     UPROPERTY(EditAnywhere, Category = "FPV|Motors")
