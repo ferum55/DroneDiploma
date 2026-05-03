@@ -139,7 +139,7 @@ private:
     float RotorDiscDiameterM = 0.254f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
-    float RotorVerticalAreaFactor = 0.2f;
+    float RotorVerticalAreaFactor = 0.225f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
     float RotorVerticalCd = 1.2f;

@@ -135,8 +135,9 @@ void ADiplomaPawn::BeginPlay()
 		*Camera->GetComponentLocation().ToString(),
 		Camera->GetAttachParent() ? *Camera->GetAttachParent()->GetName() : TEXT("None"));
 
-	
+	const ADiplomaPawn* CDO = GetClass()->GetDefaultObject<ADiplomaPawn>();
 
+	
 
 	const UInputSettings* Settings = GetDefault<UInputSettings>();
 	if (!Settings)
@@ -567,6 +568,55 @@ float ADiplomaPawn::NormalizeCenteredAxis(float Raw) const
 	return Value;
 }
 
+
+float ADiplomaPawn::ComputeAntennaOrientationLossDb(float MaxLossDb) const
+{
+	if (!PlaneMesh)
+	{
+		return 0.f;
+	}
+
+	const FVector DroneLocation = PlaneMesh->GetComponentLocation();
+	const FVector OperatorEyeLocation = OperatorLocation + FVector(0.f, 0.f, 170.f);
+	const FVector DirToOperator = (OperatorEyeLocation - DroneLocation).GetSafeNormal();
+
+	if (DirToOperator.IsNearlyZero())
+	{
+		return 0.f;
+	}
+
+	const FVector AntennaAxis = PlaneMesh->GetComponentTransform().GetUnitAxis(EAxis::Z);
+	const float AxialFactor = FMath::Abs(FVector::DotProduct(AntennaAxis, DirToOperator));
+
+	return MaxLossDb * FMath::Pow(AxialFactor, 2.f);
+}
+
+float ADiplomaPawn::ComputeBodyShadowLossDb(float MaxLossDb) const
+{
+	if (!PlaneMesh)
+	{
+		return 0.f;
+	}
+
+	const FVector DroneLocation = PlaneMesh->GetComponentLocation();
+	const FVector OperatorEyeLocation = OperatorLocation + FVector(0.f, 0.f, 170.f);
+	const FVector WorldDirToOperator = (OperatorEyeLocation - DroneLocation).GetSafeNormal();
+
+	if (WorldDirToOperator.IsNearlyZero())
+	{
+		return 0.f;
+	}
+
+	const FTransform MeshTransform = PlaneMesh->GetComponentTransform();
+	const FVector LocalDir = MeshTransform.InverseTransformVectorNoScale(WorldDirToOperator).GetSafeNormal();
+
+	const float UnderBodyFactor = FMath::Clamp((-LocalDir.Z - 0.2f) / 0.8f, 0.f, 1.f);
+	const float RearBodyFactor = FMath::Clamp((-LocalDir.X - 0.35f) / 0.65f, 0.f, 1.f) * 0.35f;
+	const float ShadowFactor = FMath::Max(UnderBodyFactor, RearBodyFactor);
+
+	return MaxLossDb * ShadowFactor;
+}
+
 void ADiplomaPawn::UpdateSignalTelemetry(float DeltaTime)
 {
 	if (!PlaneMesh)
@@ -574,165 +624,256 @@ void ADiplomaPawn::UpdateSignalTelemetry(float DeltaTime)
 		return;
 	}
 
-	const float DistanceM = FVector::Distance(
-		PlaneMesh->GetComponentLocation(),
-		OperatorLocation
-	) / 100.f;
+	const float SafeDeltaTime = FMath::Max(DeltaTime, 0.016f);
 
-	const float Obstruction = ComputeOperatorObstructionFactor();
-
-	const float ControlAlpha = FMath::Clamp(
-		DistanceM / FMath::Max(ControlMaxRangeM, 1.f),
-		0.f,
+	const float DistanceM = FMath::Max(
+		FVector::Distance(PlaneMesh->GetComponentLocation(), OperatorLocation) / 100.f,
 		1.f
 	);
 
-	float ControlRSSI = 100.f * (1.f - FMath::Pow(ControlAlpha, 1.35f));
-	ControlRSSI -= Obstruction * 20.f;
-	ControlRSSI = FMath::Clamp(ControlRSSI, 0.f, 100.f);
+	const float Obstruction = ComputeOperatorObstructionFactor();
 
-	float ControlLQ = 100.f;
+	SignalFadeTimer += SafeDeltaTime;
 
-	if (ControlRSSI < 45.f)
+	if (SignalFadeTimer >= SignalFadeUpdateInterval)
 	{
-		ControlLQ = FMath::GetMappedRangeValueClamped(
-			FVector2D(10.f, 45.f),
-			FVector2D(20.f, 100.f),
-			ControlRSSI
-		);
+		SignalFadeTimer = 0.f;
+		TargetControlFadeLossDb = FMath::FRandRange(0.f, ControlRandomFadeMaxDb);
+		TargetVideoFadeLossDb = FMath::FRandRange(0.f, VideoRandomFadeMaxDb);
 	}
 
-	ControlLQ = FMath::GetMappedRangeValueClamped(
-		FVector2D(0.f, 70.f),
-		FVector2D(0.f, 100.f),
-		ControlRSSI
+	SmoothedControlFadeLossDb = FMath::FInterpTo(
+		SmoothedControlFadeLossDb,
+		TargetControlFadeLossDb,
+		SafeDeltaTime,
+		SignalFadeInterpSpeed
 	);
 
-	ControlLQ -= Obstruction * 35.f;
-	ControlLQ = FMath::Clamp(ControlLQ, 0.f, 100.f);
+	SmoothedVideoFadeLossDb = FMath::FInterpTo(
+		SmoothedVideoFadeLossDb,
+		TargetVideoFadeLossDb,
+		SafeDeltaTime,
+		SignalFadeInterpSpeed
+	);
 
-	float VideoQuality = 100.f;
+	const float ControlAntennaLossDb = ComputeAntennaOrientationLossDb(ControlAntennaOrientationMaxLossDb);
+	const float VideoAntennaLossDb = ComputeAntennaOrientationLossDb(VideoAntennaOrientationMaxLossDb);
 
-	if (DistanceM <= VideoCleanRangeM)
-	{
-		const float CleanAlpha = FMath::Clamp(
-			DistanceM / FMath::Max(VideoCleanRangeM, 1.f),
-			0.f,
-			1.f
-		);
+	const float ControlBodyShadowLossDb = ComputeBodyShadowLossDb(ControlBodyShadowMaxLossDb);
+	const float VideoBodyShadowLossDb = ComputeBodyShadowLossDb(VideoBodyShadowMaxLossDb);
 
-		VideoQuality = FMath::Lerp(100.f, 85.f, FMath::Pow(CleanAlpha, 1.2f));
-	}
-	else if (DistanceM <= VideoUsableRangeM)
-	{
-		const float UsableAlpha = FMath::Clamp(
-			(DistanceM - VideoCleanRangeM) / FMath::Max(VideoUsableRangeM - VideoCleanRangeM, 1.f),
-			0.f,
-			1.f
-		);
+	const float ControlExtraLossDb =
+		Obstruction * ControlObstructionLossDb +
+		ControlAntennaLossDb +
+		ControlBodyShadowLossDb +
+		SmoothedControlFadeLossDb;
 
-		VideoQuality = FMath::Lerp(85.f, 45.f, FMath::Pow(UsableAlpha, 1.1f));
-	}
-	else
-	{
-		const float MaxAlpha = FMath::Clamp(
-			(DistanceM - VideoUsableRangeM) / FMath::Max(VideoMaxRangeM - VideoUsableRangeM, 1.f),
-			0.f,
-			1.f
-		);
+	const float VideoExtraLossDb =
+		Obstruction * VideoObstructionLossDb +
+		VideoAntennaLossDb +
+		VideoBodyShadowLossDb +
+		SmoothedVideoFadeLossDb;
 
-		VideoQuality = FMath::Lerp(45.f, 0.f, FMath::Pow(MaxAlpha, 0.85f));
-	}
+	const float RawControlRSSIDbm = ComputeReceivedPowerDbm(
+		ControlTxPowerW,
+		ControlTxAntennaGainDbi,
+		ControlRxAntennaGainDbi,
+		ControlFrequencyMHz,
+		DistanceM,
+		ControlExtraLossDb
+	);
 
-	VideoQuality -= Obstruction * 45.f;
-	VideoQuality = FMath::Clamp(VideoQuality, 0.f, 100.f);
+	const float RawVideoRSSIDbm = ComputeReceivedPowerDbm(
+		VideoTxPowerW,
+		VideoAntennaGainDbi,
+		VideoRxAntennaGainDbi,
+		VideoFrequencyMHz,
+		DistanceM,
+		VideoExtraLossDb
+	);
 
-	SmoothedControlRSSI = FMath::FInterpTo(SmoothedControlRSSI, ControlRSSI, DeltaTime, SignalSmoothingSpeed);
-	SmoothedControlLQ = FMath::FInterpTo(SmoothedControlLQ, ControlLQ, DeltaTime, SignalSmoothingSpeed);
-	SmoothedVideoLink = FMath::FInterpTo(SmoothedVideoLink, VideoQuality, DeltaTime, SignalSmoothingSpeed);
+	const float ControlRSSIDbm = FMath::Min(RawControlRSSIDbm, ControlMaxDisplayedRSSIDbm);
+	const float VideoRSSIDbm = FMath::Min(RawVideoRSSIDbm, VideoMaxDisplayedRSSIDbm);
 
+	const float ControlMarginDb = ControlRSSIDbm - ControlReceiverSensitivityDbm;
+	const float VideoMarginDb = VideoRSSIDbm - VideoReceiverSensitivityDbm;
+
+	const float ControlRSSIBarPercent = ComputeSignalBarPercent(ControlRSSIDbm, ControlReceiverSensitivityDbm);
+	const float ControlLQPercent = ComputeControlLQFromMargin(ControlMarginDb);
+	const float VideoQualityPercent = ComputeVideoQualityFromMargin(VideoMarginDb);
+
+	SmoothedControlRSSIDbm = FMath::FInterpTo(
+		SmoothedControlRSSIDbm,
+		ControlRSSIDbm,
+		SafeDeltaTime,
+		SignalSmoothingSpeed
+	);
+
+	SmoothedVideoRSSIDbm = FMath::FInterpTo(
+		SmoothedVideoRSSIDbm,
+		VideoRSSIDbm,
+		SafeDeltaTime,
+		SignalSmoothingSpeed
+	);
+
+	SmoothedControlRSSI = FMath::FInterpTo(
+		SmoothedControlRSSI,
+		ControlRSSIBarPercent,
+		SafeDeltaTime,
+		SignalSmoothingSpeed
+	);
+
+	SmoothedControlLQ = FMath::FInterpTo(
+		SmoothedControlLQ,
+		ControlLQPercent,
+		SafeDeltaTime,
+		SignalSmoothingSpeed
+	);
+
+	SmoothedVideoLink = FMath::FInterpTo(
+		SmoothedVideoLink,
+		VideoQualityPercent,
+		SafeDeltaTime,
+		SignalSmoothingSpeed
+	);
+
+	Telemetry.ControlRSSIDbm = SmoothedControlRSSIDbm;
+	Telemetry.ControlRSSIBarPercent = SmoothedControlRSSI;
 	Telemetry.ControlRSSIPercent = SmoothedControlRSSI;
 	Telemetry.ControlLQPercent = SmoothedControlLQ;
+	Telemetry.ControlSignalMarginDb = SmoothedControlRSSIDbm - ControlReceiverSensitivityDbm;
 	Telemetry.bControlLinkValid = true;
 
-	Telemetry.PrimaryLinkPercent = SmoothedControlRSSI;
+	Telemetry.PrimaryLinkPercent = SmoothedControlLQ;
 	Telemetry.bPrimaryLinkValid = true;
 
+	Telemetry.VideoRSSIDbm = SmoothedVideoRSSIDbm;
+	Telemetry.VideoSignalMarginDb = SmoothedVideoRSSIDbm - VideoReceiverSensitivityDbm;
 	Telemetry.VideoLinkPercent = SmoothedVideoLink;
 	Telemetry.bVideoLinkValid = true;
 
-	UpdateReceivedControlInput(DeltaTime);
+	Telemetry.TxPowerW = VideoTxPowerW;
+	Telemetry.bTxPowerValid = true;
 
-	static float SignalLogTimer = 0.f;
-	SignalLogTimer += DeltaTime;
+	UpdateReceivedControlInput(SafeDeltaTime);
 
-	if (SignalLogTimer >= 0.5f)
-	{
-		SignalLogTimer = 0.f;
-
-		/*UE_LOG(LogTemp, Warning,
-			TEXT("SIGNAL | Dist=%.1fm | Obstruction=%.2f | CTRL RSSI=%.0f LQ=%.0f | InputScale=%.2f | Failsafe=%d | FSTime=%.2f | VIDEO=%.0f"),
-			DistanceM,
-			Obstruction,
-			Telemetry.ControlRSSIPercent,
-			Telemetry.ControlLQPercent,
-			ControlInputScale,
-			bControlFailsafeActive ? 1 : 0,
-			ControlFailsafeActiveTime,
-			Telemetry.VideoLinkPercent
-		);*/
-	}
 	if (FPVPostProcessMID)
 	{
 		const float VideoQuality01 = Telemetry.VideoLinkPercent / 100.f;
 		FPVPostProcessMID->SetScalarParameterValue(TEXT("VideoQuality"), VideoQuality01);
-		static float PPLogTimer = 0.f;
-		PPLogTimer += DeltaTime;
+	}
 
-		if (PPLogTimer >= 0.5f)
-		{
-			PPLogTimer = 0.f;
+	static float SignalLogTimer = 0.f;
+	SignalLogTimer += SafeDeltaTime;
 
-			/*UE_LOG(LogTemp, Warning,
-				TEXT("PP | VideoQuality01=%.2f | MID=%s"),
-				VideoQuality01,
-				FPVPostProcessMID ? TEXT("YES") : TEXT("NO")
-			);*/
-		}
+	if (bLogSignalDebug && SignalLogTimer >= 0.5f)
+	{
+		SignalLogTimer = 0.f;
+
+		UE_LOG(LogTemp, Warning,
+			TEXT("SIGNAL | Dist=%.1fm Obs=%.2f LossC=%.1f LossV=%.1f | CTRL RSSI=%.1fdBm Bar=%.0f LQ=%.0f EffLQ=%.0f Override=%.1f Margin=%.1fdB | VIDEO RSSI=%.1fdBm Q=%.0f Margin=%.1fdB | VTX=%.1fW | Packet=%d Age=%.3f | Failsafe=%d"),
+			DistanceM,
+			Obstruction,
+			ControlExtraLossDb,
+			VideoExtraLossDb,
+			Telemetry.ControlRSSIDbm,
+			Telemetry.ControlRSSIPercent,
+			Telemetry.ControlLQPercent,
+			EffectiveControlLQ,
+			ControlPacketDebugLQOverride,
+			Telemetry.ControlSignalMarginDb,
+			Telemetry.VideoRSSIDbm,
+			Telemetry.VideoLinkPercent,
+			Telemetry.VideoSignalMarginDb,
+			Telemetry.TxPowerW,
+			bLastControlPacketReceived ? 1 : 0,
+			ControlPacketAgeSeconds,
+			bControlFailsafeActive ? 1 : 0
+		);
 	}
 }
 
 void ADiplomaPawn::UpdateReceivedControlInput(float DeltaTime)
 {
 	const float SafeDeltaTime = FMath::Max(DeltaTime, 0.f);
-	const float LQ = Telemetry.bControlLinkValid ? Telemetry.ControlLQPercent : 100.f;
+
+	float LQ = Telemetry.bControlLinkValid ? Telemetry.ControlLQPercent : 100.f;
+
+	if (ControlPacketDebugLQOverride >= 0.f)
+	{
+		LQ = FMath::Clamp(ControlPacketDebugLQOverride, 0.f, 100.f);
+	}
+	EffectiveControlLQ = LQ;
+
+	if (LQ >= ControlDegradedLQ)
+	{
+		ControlInputScale = 1.f;
+	}
+	else if (LQ <= ControlCriticalLQ)
+	{
+		ControlInputScale = FMath::GetMappedRangeValueClamped(
+			FVector2D(ControlFailsafeLQ, ControlCriticalLQ),
+			FVector2D(ControlMinimumInputScale, ControlCriticalInputScale),
+			LQ
+		);
+	}
+	else
+	{
+		ControlInputScale = FMath::GetMappedRangeValueClamped(
+			FVector2D(ControlCriticalLQ, ControlDegradedLQ),
+			FVector2D(ControlCriticalInputScale, 1.f),
+			LQ
+		);
+	}
+
+	bool bPacketReceivedThisFrame = true;
+
+	if (bSimulateControlPackets)
+	{
+		bPacketReceivedThisFrame = false;
+
+		const float PacketInterval = 1.f / FMath::Max(ControlPacketRateHz, 1.f);
+		ControlPacketAccumulator += SafeDeltaTime;
+		ControlPacketAgeSeconds += SafeDeltaTime;
+
+		while (ControlPacketAccumulator >= PacketInterval)
+		{
+			ControlPacketAccumulator -= PacketInterval;
+
+			const float PacketSuccessChance = FMath::Clamp(LQ / 100.f, 0.f, 1.f);
+
+			if (FMath::FRand() <= PacketSuccessChance)
+			{
+				bPacketReceivedThisFrame = true;
+				ControlPacketAgeSeconds = 0.f;
+			}
+		}
+	}
+	else
+	{
+		ControlPacketAgeSeconds = 0.f;
+	}
+
+	bLastControlPacketReceived = bPacketReceivedThisFrame;
 
 	if (!bControlFailsafeActive)
 	{
-		if (LQ <= ControlFailsafeLQ)
+		if (ControlPacketAgeSeconds >= ControlPacketFailsafeTimeout)
 		{
-			ControlFailsafeTimer += SafeDeltaTime;
-
-			if (ControlFailsafeTimer >= ControlFailsafeEnterDelay)
-			{
-				bControlFailsafeActive = true;
-				ControlFailsafeActiveTime = 0.f;
-			}
-		}
-		else
-		{
-			ControlFailsafeTimer = 0.f;
+			bControlFailsafeActive = true;
+			ControlFailsafeActiveTime = 0.f;
 		}
 	}
 	else
 	{
 		ControlFailsafeActiveTime += SafeDeltaTime;
 
-		if (LQ >= ControlFailsafeRecoverLQ)
+		if (bPacketReceivedThisFrame)
 		{
 			bControlFailsafeActive = false;
 			ControlFailsafeTimer = 0.f;
 			ControlFailsafeActiveTime = 0.f;
+			ControlPacketAgeSeconds = 0.f;
 		}
 	}
 
@@ -754,30 +895,14 @@ void ADiplomaPawn::UpdateReceivedControlInput(float DeltaTime)
 			ReceivedRollInput = 0.f;
 			ReceivedYawInput = 0.f;
 		}
-	}
-	else
-	{
-		if (LQ >= ControlDegradedLQ)
-		{
-			ControlInputScale = 1.f;
-		}
-		else if (LQ <= ControlCriticalLQ)
-		{
-			ControlInputScale = FMath::GetMappedRangeValueClamped(
-				FVector2D(ControlFailsafeLQ, ControlCriticalLQ),
-				FVector2D(ControlMinimumInputScale, ControlCriticalInputScale),
-				LQ
-			);
-		}
-		else
-		{
-			ControlInputScale = FMath::GetMappedRangeValueClamped(
-				FVector2D(ControlCriticalLQ, ControlDegradedLQ),
-				FVector2D(ControlCriticalInputScale, 1.f),
-				LQ
-			);
-		}
 
+		Telemetry.ControlInputScale = ControlInputScale;
+		Telemetry.bControlFailsafeActive = bControlFailsafeActive;
+		return;
+	}
+
+	if (bPacketReceivedThisFrame)
+	{
 		ReceivedThrottle = Throttle;
 		ReceivedPitchInput = PitchInput * ControlInputScale;
 		ReceivedRollInput = RollInput * ControlInputScale;
@@ -845,6 +970,110 @@ float ADiplomaPawn::ComputeOperatorObstructionFactor() const
 	const float RawObstruction = static_cast<float>(BlockedCount) / static_cast<float>(Offsets.Num());
 
 	return FMath::Clamp(RawObstruction, 0.f, 1.f);
+}
+
+float ADiplomaPawn::WattsToDbm(float Watts) const
+{
+	const float Milliwatts = FMath::Max(Watts * 1000.f, 0.001f);
+	return 10.f * FMath::LogX(10.f, Milliwatts);
+}
+
+float ADiplomaPawn::ComputeFreeSpacePathLossDb(float DistanceM, float FrequencyMHz) const
+{
+	const float DistanceKm = FMath::Max(DistanceM / 1000.f, 0.001f);
+	const float Frequency = FMath::Max(FrequencyMHz, 1.f);
+
+	return 32.44f
+		+ 20.f * FMath::LogX(10.f, DistanceKm)
+		+ 20.f * FMath::LogX(10.f, Frequency);
+}
+
+float ADiplomaPawn::ComputeReceivedPowerDbm(
+	float TxPowerW,
+	float TxGainDbi,
+	float RxGainDbi,
+	float FrequencyMHz,
+	float DistanceM,
+	float ExtraLossDb
+) const
+{
+	const float TxPowerDbm = WattsToDbm(TxPowerW);
+	const float PathLossDb = ComputeFreeSpacePathLossDb(DistanceM, FrequencyMHz);
+
+	return TxPowerDbm + TxGainDbi + RxGainDbi - PathLossDb - ExtraLossDb;
+}
+
+float ADiplomaPawn::ComputeSignalBarPercent(float RSSIDbm, float SensitivityDbm) const
+{
+	return FMath::GetMappedRangeValueClamped(
+		FVector2D(SensitivityDbm - 5.f, SensitivityDbm + 40.f),
+		FVector2D(0.f, 100.f),
+		RSSIDbm
+	);
+}
+
+float ADiplomaPawn::ComputeControlLQFromMargin(float MarginDb) const
+{
+	if (MarginDb >= 18.f)
+	{
+		return 100.f;
+	}
+
+	if (MarginDb >= 6.f)
+	{
+		return FMath::GetMappedRangeValueClamped(
+			FVector2D(6.f, 18.f),
+			FVector2D(75.f, 100.f),
+			MarginDb
+		);
+	}
+
+	if (MarginDb >= 0.f)
+	{
+		return FMath::GetMappedRangeValueClamped(
+			FVector2D(0.f, 6.f),
+			FVector2D(25.f, 75.f),
+			MarginDb
+		);
+	}
+
+	return FMath::GetMappedRangeValueClamped(
+		FVector2D(-8.f, 0.f),
+		FVector2D(0.f, 25.f),
+		MarginDb
+	);
+}
+
+float ADiplomaPawn::ComputeVideoQualityFromMargin(float MarginDb) const
+{
+	if (MarginDb >= 25.f)
+	{
+		return 100.f;
+	}
+
+	if (MarginDb >= 10.f)
+	{
+		return FMath::GetMappedRangeValueClamped(
+			FVector2D(10.f, 25.f),
+			FVector2D(65.f, 100.f),
+			MarginDb
+		);
+	}
+
+	if (MarginDb >= 0.f)
+	{
+		return FMath::GetMappedRangeValueClamped(
+			FVector2D(0.f, 10.f),
+			FVector2D(25.f, 65.f),
+			MarginDb
+		);
+	}
+
+	return FMath::GetMappedRangeValueClamped(
+		FVector2D(-8.f, 0.f),
+		FVector2D(0.f, 25.f),
+		MarginDb
+	);
 }
 
 void ADiplomaPawn::FindKillCamPosition(const FVector& HitLocation)
@@ -1295,9 +1524,19 @@ void ADiplomaPawn::ResetDroneStateAfterRespawn()
 	ControlFailsafeTimer = 0.f;
 	ControlFailsafeActiveTime = 0.f;
 
+	ControlPacketAccumulator = 0.f;
+	ControlPacketAgeSeconds = 0.f;
+	bLastControlPacketReceived = true;
+
 	SmoothedControlRSSI = 100.f;
 	SmoothedControlLQ = 100.f;
 	SmoothedVideoLink = 100.f;
+
+	SignalFadeTimer = 0.f;
+	TargetControlFadeLossDb = 0.f;
+	TargetVideoFadeLossDb = 0.f;
+	SmoothedControlFadeLossDb = 0.f;
+	SmoothedVideoFadeLossDb = 0.f;
 
 	bArmedState = false;
 	bBombArmedState = false;

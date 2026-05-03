@@ -103,6 +103,23 @@ struct FDroneTelemetry
 	float ControlLQPercent = 0.f;
 
 	UPROPERTY(BlueprintReadOnly)
+	float ControlRSSIDbm = -130.f;
+
+
+	UPROPERTY(BlueprintReadOnly)
+	float ControlRSSIBarPercent = 0.f;
+
+	UPROPERTY(BlueprintReadOnly)
+	float VideoRSSIDbm = -130.f;
+
+	UPROPERTY(BlueprintReadOnly)
+	float ControlSignalMarginDb = 0.f;
+
+	UPROPERTY(BlueprintReadOnly)
+	float VideoSignalMarginDb = 0.f;
+
+
+	UPROPERTY(BlueprintReadOnly)
 	bool bControlLinkValid = false;
 
 	UPROPERTY(BlueprintReadOnly)
@@ -229,15 +246,112 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
 	float ControlFailsafeHoldSeconds = 0.5f;
 
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlTxPowerW = 1.0f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlTxAntennaGainDbi = 2.0f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlRxAntennaGainDbi = 2.0f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlReceiverSensitivityDbm = -112.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoRxAntennaGainDbi = 8.0f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoReceiverSensitivityDbm = -90.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlObstructionLossDb = 22.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoObstructionLossDb = 35.f;
+
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlMaxDisplayedRSSIDbm = -35.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoMaxDisplayedRSSIDbm = -35.f;
+
+	float SmoothedControlRSSIDbm = -50.f;
+	float SmoothedVideoRSSIDbm = -50.f;
+
 	float ControlFailsafeTimer = 0.f;
 	float ControlFailsafeActiveTime = 0.f;
+	float EffectiveControlLQ = 100.f;
 
 	float LastValidReceivedThrottle = 0.f;
 	float LastValidReceivedPitchInput = 0.f;
 	float LastValidReceivedRollInput = 0.f;
 	float LastValidReceivedYawInput = 0.f;
 
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	bool bSimulateControlPackets = true;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlPacketRateHz = 50.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlPacketDebugLQOverride = -1.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlPacketAgeSeconds = 0.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	bool bLastControlPacketReceived = true;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlPacketFailsafeTimeout = 0.6f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	bool bLogSignalDebug = false;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlAntennaOrientationMaxLossDb = 4.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoAntennaOrientationMaxLossDb = 8.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlBodyShadowMaxLossDb = 5.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoBodyShadowMaxLossDb = 12.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float ControlRandomFadeMaxDb = 2.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoRandomFadeMaxDb = 6.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float SignalFadeUpdateInterval = 0.25f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float SignalFadeInterpSpeed = 4.f;
+
+	float SignalFadeTimer = 0.f;
+	float TargetControlFadeLossDb = 0.f;
+	float TargetVideoFadeLossDb = 0.f;
+	float SmoothedControlFadeLossDb = 0.f;
+	float SmoothedVideoFadeLossDb = 0.f;
+
+	float ControlPacketAccumulator = 0.f;
+
 	virtual void ResetDroneStateAfterRespawn();
+
+	float WattsToDbm(float Watts) const;
+	float ComputeFreeSpacePathLossDb(float DistanceM, float FrequencyMHz) const;
+	float ComputeReceivedPowerDbm(float TxPowerW, float TxGainDbi, float RxGainDbi, float FrequencyMHz, float DistanceM, float ExtraLossDb) const;
+	float ComputeSignalBarPercent(float RSSIDbm, float SensitivityDbm) const;
+	float ComputeControlLQFromMargin(float MarginDb) const;
+	float ComputeVideoQualityFromMargin(float MarginDb) const;
+	float ComputeAntennaOrientationLossDb(float MaxLossDb) const;
+	float ComputeBodyShadowLossDb(float MaxLossDb) const;
 
 	//Interference
 

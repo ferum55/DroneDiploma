@@ -11,6 +11,7 @@
 
 class UTextBlock;
 class UCanvasPanel;
+class URetainerBox;
 
 UCLASS()
 class DIPLOMA_API UFPVHUDWidget : public UUserWidget
@@ -79,6 +80,7 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "HUD")
 	float PixelsPerPitchDegree = 4.f;
 
+
 	//Compass
 	virtual void NativeConstruct() override;
 
@@ -87,6 +89,12 @@ protected:
 
 	UPROPERTY()
 	UMaterialInstanceDynamic* CompassMaterialInstance = nullptr;
+
+	UPROPERTY(meta = (BindWidget))
+	URetainerBox* Retainer_HUD = nullptr;
+
+	UPROPERTY()
+	UMaterialInstanceDynamic* HUDInterferenceMaterialInstance = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Compass")
 	float CompassZeroOffset = 0.75f;

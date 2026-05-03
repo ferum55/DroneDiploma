@@ -5,6 +5,7 @@
 
 #include "Components/Image.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Components/RetainerBox.h"
 
 void UFPVHUDWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 {
@@ -14,7 +15,7 @@ void UFPVHUDWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 		if (InTelemetry.bControlLinkValid)
 		{
 			Text_PrimaryLink->SetText(FText::FromString(
-				FString::Printf(TEXT("%.0f %.0f"), InTelemetry.ControlRSSIPercent, InTelemetry.ControlLQPercent)
+				FString::Printf(TEXT("%.0f %.0f"), InTelemetry.ControlRSSIDbm, InTelemetry.ControlLQPercent)
 			));
 		}
 		else
@@ -22,7 +23,6 @@ void UFPVHUDWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 			Text_PrimaryLink->SetText(FText::FromString(TEXT("-- --")));
 		}
 	}
-
 	if (Text_VideoLink)
 	{
 		if (InTelemetry.bVideoLinkValid)
@@ -37,12 +37,18 @@ void UFPVHUDWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 		}
 	}
 
+	if (HUDInterferenceMaterialInstance)
+	{
+		const float VideoQuality01 = FMath::Clamp(InTelemetry.VideoLinkPercent / 100.f, 0.f, 1.f);
+		HUDInterferenceMaterialInstance->SetScalarParameterValue(TEXT("VideoQuality"), VideoQuality01);
+	}
+
 	if (Text_TxPower)
 	{
 		if (InTelemetry.bTxPowerValid)
 		{
 			Text_TxPower->SetText(FText::FromString(
-				FString::Printf(TEXT("%.1f W"), InTelemetry.TxPowerW)
+				FString::Printf(TEXT("%.0f W"), InTelemetry.TxPowerW)
 			));
 		}
 		else
@@ -232,5 +238,9 @@ void UFPVHUDWidget::NativeConstruct()
 			CompassMaterialInstance = UMaterialInstanceDynamic::Create(Material, this);
 			Image_CompassStrip->SetBrushFromMaterial(CompassMaterialInstance);
 		}
+	}
+	if (Retainer_HUD)
+	{
+		HUDInterferenceMaterialInstance = Retainer_HUD->GetEffectMaterial();
 	}
 }

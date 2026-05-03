@@ -382,7 +382,7 @@ void AFPVDronePawn::ApplyAerodynamicDrag()
     Mesh->AddForce(WorldDragCm);
 
     static float DragLogTimer = 0.f;
-    DragLogTimer += LastDeltaSeconds;
+    /*DragLogTimer += LastDeltaSeconds;
 
     if (DragLogTimer >= 0.5f)
     {
@@ -476,7 +476,7 @@ void AFPVDronePawn::ApplyAerodynamicDrag()
             DragHorizN,
             NetHorizN
         );
-    }
+    }*/
 }
 
 void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
@@ -776,7 +776,7 @@ void AFPVDronePawn::UpdateTelemetry()
     Telemetry.ConsumedMah = BatteryConsumedAh * 1000.f;
     Telemetry.CurrentAmp = BatteryTotalCurrentA;
     Telemetry.bBatteryValid = true;
-    Telemetry.TxPowerW = TxPowerWValue;
+    Telemetry.TxPowerW = VideoTxPowerW;
     Telemetry.bTxPowerValid = true;
 }
 
