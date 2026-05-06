@@ -4,6 +4,8 @@
 #include "Blueprint/UserWidget.h"
 #include "DiplomaPawn.h"
 #include "Components/Image.h"
+#include "Components/ProgressBar.h"
+#include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
 #include "FPVHUDWidget.generated.h"
@@ -23,6 +25,13 @@ public:
 	void ApplyTelemetry(const FDroneTelemetry& InTelemetry);
 
 protected:
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	UImage* Image_PitchArrow = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, Category = "FPV|HUD")
+	UTexture2D* PitchArrowTexture = nullptr;
+
 	UPROPERTY(meta = (BindWidget))
 	UTextBlock* Text_PrimaryLink;
 
@@ -74,11 +83,18 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	UCanvasPanel* Canvas_HorizonRoot;
 
+	UPROPERTY(meta = (BindWidget))
+	UProgressBar* BarPackBattery = nullptr;
+
+	UPROPERTY(meta = (BindWidget))
+	UProgressBar* BarCellBattery = nullptr;
+
 	UPROPERTY(EditAnywhere, Category = "HUD")
 	float CameraPitchOffsetDeg = 20.f;
 
 	UPROPERTY(EditAnywhere, Category = "HUD")
 	float PixelsPerPitchDegree = 4.f;
+
 
 
 	//Compass

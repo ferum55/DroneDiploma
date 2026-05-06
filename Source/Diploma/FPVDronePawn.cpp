@@ -3,6 +3,9 @@
 #include "Components/StaticMeshComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Components/InputComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/DamageType.h"
 
 AFPVDronePawn::AFPVDronePawn()
 {
@@ -103,6 +106,76 @@ void AFPVDronePawn::BeginPlay()
     MaxThrust = 0.f;
 }
 
+void AFPVDronePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+{
+    Super::SetupPlayerInputComponent(PlayerInputComponent);
+
+    PlayerInputComponent->BindAction("CycleFlightMode", IE_Pressed, this, &AFPVDronePawn::CycleFlightMode);
+}
+
+void AFPVDronePawn::CycleFlightMode()
+{
+    const int32 Current = static_cast<int32>(FlightMode);
+    const int32 Next = (Current + 1) % 4;
+
+    FlightMode = static_cast<EFPVFlightMode>(Next);
+
+    PitchPID.Reset();
+    RollPID.Reset();
+    YawPID.Reset();
+
+    UE_LOG(LogTemp, Warning, TEXT("FlightMode: %s"), *GetFlightModeText());
+}
+
+FString AFPVDronePawn::GetFlightModeText() const
+{
+    switch (FlightMode)
+    {
+    case EFPVFlightMode::Acro:
+        return TEXT("ACRO");
+
+    case EFPVFlightMode::Angle:
+        return TEXT("ANGLE");
+
+    case EFPVFlightMode::Horizon:
+        return TEXT("HORIZON");
+
+    case EFPVFlightMode::AcroTrainer:
+        return TEXT("ACRO TRAINER");
+
+    default:
+        return TEXT("ACRO");
+    }
+}
+
+float AFPVDronePawn::ComputeAngleRateNorm(float TargetAngleDeg, float CurrentAngleDeg, float MaxRateDeg) const
+{
+    const float ErrorDeg = CurrentAngleDeg - TargetAngleDeg;
+    const float TargetRateDeg = FMath::Clamp(ErrorDeg * AngleLevelGain, -MaxRateDeg, MaxRateDeg);
+
+    return TargetRateDeg / FMath::Max(MaxRateDeg, KINDA_SMALL_NUMBER);
+}
+float AFPVDronePawn::ApplyAcroTrainerLimit(float TargetRateNorm, float CurrentAngleDeg, float LimitDeg, float MaxRateDeg) const
+{
+    const float AbsAngle = FMath::Abs(CurrentAngleDeg);
+
+    if (AbsAngle < LimitDeg)
+    {
+        return TargetRateNorm;
+    }
+
+    const float LimitAngleDeg = FMath::Sign(CurrentAngleDeg) * LimitDeg;
+    const float ReturnRateDeg = FMath::Clamp((CurrentAngleDeg - LimitAngleDeg) * AcroTrainerReturnGain, -MaxRateDeg, MaxRateDeg);
+    const float ReturnRateNorm = ReturnRateDeg / FMath::Max(MaxRateDeg, KINDA_SMALL_NUMBER);
+
+    if (CurrentAngleDeg * TargetRateNorm < 0.f)
+    {
+        return ReturnRateNorm;
+    }
+
+    return TargetRateNorm;
+}
+
 void AFPVDronePawn::ApplyThrust()
 {
     ApplyMotorForces();
@@ -192,14 +265,104 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
     const float CurrentPitchRateNorm = LocalAngVelDeg.Y / MaxPitchRate;
     const float CurrentYawRateNorm = LocalAngVelDeg.Z / MaxYawRate;
 
-    const float TargetRollRateNorm = -GetReceivedRollInput();
-    const float TargetPitchRateNorm = GetReceivedPitchInput();
+    const FRotator MeshRotation = Mesh->GetComponentRotation();
+    const float CurrentPitchDeg = FRotator::NormalizeAxis(MeshRotation.Pitch);
+    const float CurrentRollDeg = FRotator::NormalizeAxis(MeshRotation.Roll);
+
+    const float AcroTargetRollRateNorm = -GetReceivedRollInput();
+    const float AcroTargetPitchRateNorm = GetReceivedPitchInput();
     const float TargetYawRateNorm = GetReceivedYawInput();
+
+    float TargetRollRateNorm = AcroTargetRollRateNorm;
+    float TargetPitchRateNorm = AcroTargetPitchRateNorm;
+
+    //
+    float TargetRollDeg = 0.f;
+    float TargetPitchDeg = 0.f;
+    float AngleRollRateNorm = 0.f;
+    float AnglePitchRateNorm = 0.f;
+    float HorizonAlpha = 0.f;
+    bool bDidFlightModeDebugLog = false;
+    //
+    if (FlightMode == EFPVFlightMode::Angle)
+    {
+        TargetRollDeg = GetReceivedRollInput() * AngleMaxRollDeg;
+        TargetPitchDeg = -GetReceivedPitchInput() * AngleMaxPitchDeg;
+
+        AngleRollRateNorm = ComputeAngleRateNorm(TargetRollDeg, CurrentRollDeg, MaxRollRate);
+        AnglePitchRateNorm = ComputeAngleRateNorm(TargetPitchDeg, CurrentPitchDeg, MaxPitchRate);
+
+        TargetRollRateNorm = AngleRollRateNorm;
+        TargetPitchRateNorm = AnglePitchRateNorm;
+    }
+    else if (FlightMode == EFPVFlightMode::Horizon)
+    {
+        const float StickAmount = FMath::Max(FMath::Abs(GetReceivedPitchInput()), FMath::Abs(GetReceivedRollInput()));
+
+        /*const float*/ HorizonAlpha = FMath::GetMappedRangeValueClamped(
+            FVector2D(HorizonTransitionStart, HorizonTransitionEnd),
+            FVector2D(0.f, 1.f),
+            StickAmount
+        );
+
+        /*const float*/ TargetRollDeg = GetReceivedRollInput() * AngleMaxRollDeg;
+        /*const float*/ TargetPitchDeg = -GetReceivedPitchInput() * AngleMaxPitchDeg;
+
+        const float AngleTargetRollRateNorm = ComputeAngleRateNorm(TargetRollDeg, CurrentRollDeg, MaxRollRate);
+        const float AngleTargetPitchRateNorm = ComputeAngleRateNorm(TargetPitchDeg, CurrentPitchDeg, MaxPitchRate);
+
+        TargetRollRateNorm = FMath::Lerp(AngleTargetRollRateNorm, AcroTargetRollRateNorm, HorizonAlpha);
+        TargetPitchRateNorm = FMath::Lerp(AngleTargetPitchRateNorm, AcroTargetPitchRateNorm, HorizonAlpha);
+    }
+    else if (FlightMode == EFPVFlightMode::AcroTrainer)
+    {
+        TargetRollRateNorm = ApplyAcroTrainerLimit(AcroTargetRollRateNorm, CurrentRollDeg, AcroTrainerMaxRollDeg, MaxRollRate);
+        TargetPitchRateNorm = ApplyAcroTrainerLimit(AcroTargetPitchRateNorm, CurrentPitchDeg, AcroTrainerMaxPitchDeg, MaxPitchRate);
+    }
 
     const float RollCmd = FMath::Clamp(RollPID.Update(TargetRollRateNorm, CurrentRollRateNorm, DeltaTime), -0.05f, 0.05f);
     const float PitchCmd = FMath::Clamp(PitchPID.Update(TargetPitchRateNorm, CurrentPitchRateNorm, DeltaTime), -0.05f, 0.05f);
     const float YawCmd = FMath::Clamp(YawPID.Update(TargetYawRateNorm, CurrentYawRateNorm, DeltaTime), -0.1f, 0.1f);
 
+    //
+    FlightModeDebugTimer += DeltaTime;
+
+    if (bLogFlightModeDebug && FlightModeDebugTimer >= FlightModeDebugInterval)
+    {
+        FlightModeDebugTimer = 0.f;
+
+        const float RollErrorDeg = TargetRollDeg - CurrentRollDeg;
+        const float PitchErrorDeg = TargetPitchDeg - CurrentPitchDeg;
+        bDidFlightModeDebugLog = true;
+        UE_LOG(LogTemp, Warning,
+            TEXT("MODE_DBG | Mode=%s Thr=%.2f | In P=%.2f R=%.2f Y=%.2f | Ang P=%.1f R=%.1f | TgtAng P=%.1f R=%.1f | Err P=%+.1f R=%+.1f"),
+            *GetFlightModeText(),
+            BaseThrottle,
+            GetReceivedPitchInput(),
+            GetReceivedRollInput(),
+            GetReceivedYawInput(),
+            CurrentPitchDeg,
+            CurrentRollDeg,
+            TargetPitchDeg,
+            TargetRollDeg,
+            PitchErrorDeg,
+            RollErrorDeg
+        );
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("RATE_DBG | CurRate P=%+.1f R=%+.1f Y=%+.1f | TgtRate P=%+.1f R=%+.1f Y=%+.1f | Cmd P=%+.4f R=%+.4f Y=%+.4f"),
+            LocalAngVelDeg.Y,
+            LocalAngVelDeg.X,
+            LocalAngVelDeg.Z,
+            TargetPitchRateNorm * MaxPitchRate,
+            TargetRollRateNorm * MaxRollRate,
+            TargetYawRateNorm * MaxYawRate,
+            PitchCmd,
+            RollCmd,
+            YawCmd
+        );
+    }
+    //
     const float ArmMin = FMath::Min(ArmX, ArmY);
 
     const float PitchMix = PitchCmd * (ArmMin / FMath::Max(ArmX, 0.001f));
@@ -209,6 +372,21 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
     const float FR = BaseThrottle - PitchMix + RollMix - YawCmd * Motors[1].SpinDirection;
     const float BL = BaseThrottle + PitchMix - RollMix - YawCmd * Motors[2].SpinDirection;
     const float BR = BaseThrottle + PitchMix + RollMix - YawCmd * Motors[3].SpinDirection;
+    //
+    if (bDidFlightModeDebugLog)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("MIX_DBG | PitchMix=%+.4f RollMix=%+.4f YawCmd=%+.4f | FL=%.3f FR=%.3f BL=%.3f BR=%.3f"),
+            PitchMix,
+            RollMix,
+            YawCmd,
+            FL,
+            FR,
+            BL,
+            BR
+        );
+    }
+    //
 
     Motors[0].Command = FMath::Clamp(FL, 0.f, 1.f);
     Motors[1].Command = FMath::Clamp(FR, 0.f, 1.f);
@@ -302,7 +480,7 @@ float AFPVDronePawn::ComputePropEfficiencyFactor(const FVector& LocalVelocityMps
     const float ForwardSpeedMps = FMath::Max(LocalVelocityMps.X, 0.f);
 
     const float VerticalRatio = VerticalSpeedMps / FMath::Max(PropwashSpeedScaleMps, 0.1f);
-    const float VerticalPenalty = 0.08f * FMath::Clamp(VerticalRatio * VerticalRatio, 0.f, 1.f);
+    const float VerticalPenalty = 0.1f * FMath::Clamp(VerticalRatio * VerticalRatio, 0.f, 1.f);
 
     const float ForwardStartMps = 12.f;
     const float ForwardFullMps = 32.f;
@@ -372,8 +550,10 @@ void AFPVDronePawn::ApplyAerodynamicDrag()
 
     const float TotalCdA = BodyCdA + RotorCdA;
 
+
     const float DynamicPressure = 0.5f * AirDensity * SpeedMps * SpeedMps;
     const float DragMagnitudeN = DynamicPressure * TotalCdA;
+
 
     const FVector LocalDragN = -LocalDir * DragMagnitudeN;
     const FVector WorldDragN = MeshTransform.TransformVectorNoScale(LocalDragN);
@@ -382,21 +562,24 @@ void AFPVDronePawn::ApplyAerodynamicDrag()
     Mesh->AddForce(WorldDragCm);
 
     static float DragLogTimer = 0.f;
-    /*DragLogTimer += LastDeltaSeconds;
+    static float FlightAuditLogTimer = 0.f;
+    FlightAuditLogTimer += LastDeltaSeconds;
 
-    if (DragLogTimer >= 0.5f)
+    if (FlightAuditLogTimer >= 0.5f)
     {
-        DragLogTimer = 0.f;
+        FlightAuditLogTimer = 0.f;
 
         float TotalThrustN = 0.f;
         float ThrottleAvg = 0.f;
         float AvgRPM = 0.f;
+        float TotalPowerW = 0.f;
 
         for (const FMotorState& M : Motors)
         {
             TotalThrustN += M.ThrustNewton;
             ThrottleAvg += M.CurrentCommand;
             AvgRPM += M.CurrentRPM;
+            TotalPowerW += M.ElectricalPowerWatt;
         }
 
         if (Motors.Num() > 0)
@@ -427,56 +610,51 @@ void AFPVDronePawn::ApplyAerodynamicDrag()
         const float DragHorizN = FVector::DotProduct(WorldDragN, HorizDir);
         const float NetHorizN = FVector::DotProduct(WorldNetN, HorizDir);
 
+        const float TWR = WeightN > KINDA_SMALL_NUMBER ? TotalThrustN / WeightN : 0.f;
+        const float TiltDeg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(UpVector.Z, -1.f, 1.f)));
+        const float RequiredVerticalThrustN = WeightN - DragVertN;
+
+        const float RequiredTiltDeg = TotalThrustN > KINDA_SMALL_NUMBER
+            ? FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(RequiredVerticalThrustN / TotalThrustN, 0.f, 1.f)))
+            : 0.f;
+
+        const float PropEff = ComputePropEfficiencyFactor(LocalVelMps);
         const FRotator R = Mesh->GetComponentRotation();
 
-        UE_LOG(LogTemp, Warning,
-            TEXT("[DRAG] Thr=%.0f%% RPM=%.0f I=%.1fA Vbat=%.2fV | V=%.1fkm/h H=%.1fkm/h Vz=%+.2fm/s | Rot P=%.1f R=%.1f Y=%.1f"),
+        /*UE_LOG(LogTemp, Warning,
+            TEXT("FLIGHT_AUDIT | Thr=%.0f%% RPM=%.0f Pitch=%.1f Tilt=%.1f ReqTilt=%.1f | V=%.1f H=%.1f Vz=%+.2f | LocalVel X=%.2f Y=%.2f Z=%.2f | PropEff=%.2f"),
             ThrottleAvg * 100.f,
             AvgRPM,
-            BatteryTotalCurrentA,
-            BatteryLoadedVoltage,
+            R.Pitch,
+            TiltDeg,
+            RequiredTiltDeg,
             SpeedKmh,
             HorizSpeedKmh,
             VertSpeedMps,
-            R.Pitch,
-            R.Roll,
-            R.Yaw
-        );
-
-        UE_LOG(LogTemp, Warning,
-            TEXT("[DRAG] LocalVel X=%.2f Y=%.2f Z=%.2f | Dir X=%.3f Y=%.3f Z=%.3f | q=%.1fPa"),
             LocalVelMps.X,
             LocalVelMps.Y,
             LocalVelMps.Z,
-            LocalDir.X,
-            LocalDir.Y,
-            LocalDir.Z,
-            DynamicPressure
+            PropEff
         );
 
         UE_LOG(LogTemp, Warning,
-            TEXT("[DRAG] CdA Body=%.5f Rotor=%.5f Total=%.5f | DragMag=%.2fN | LocalDrag X=%.2f Y=%.2f Z=%.2f"),
-            BodyCdA,
-            RotorCdA,
-            TotalCdA,
-            DragMagnitudeN,
-            LocalDragN.X,
-            LocalDragN.Y,
-            LocalDragN.Z
-        );
-
-        UE_LOG(LogTemp, Warning,
-            TEXT("[FORCE] Thrust=%.2fN Weight=%.2fN | Vert T=%.2f D=%.2f Net=%+.2f | Horiz T=%.2f D=%.2f Net=%+.2f"),
+            TEXT("FORCE_AUDIT | T=%.1fN W=%.1fN TWR=%.2f | Vert T=%.1f D=%+.1f Net=%+.1f | Horiz T=%.1f D=%+.1f Net=%+.1f | CdA=%.5f Drag=%.1fN | I=%.1fA P=%.0fW Vbat=%.2f"),
             TotalThrustN,
             WeightN,
+            TWR,
             ThrustVertN,
             DragVertN,
             NetVertN,
             ThrustHorizN,
             DragHorizN,
-            NetHorizN
-        );
-    }*/
+            NetHorizN,
+            TotalCdA,
+            DragMagnitudeN,
+            BatteryTotalCurrentA,
+            TotalPowerW,
+            BatteryLoadedVoltage
+        );*/
+    }
 }
 
 void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
@@ -601,7 +779,7 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
 
         Motor.ElectricalPowerWatt = ElectricalPower;
         Motor.CurrentDrawAmp = BatteryLoadedVoltage > KINDA_SMALL_NUMBER ? ElectricalPower / BatteryLoadedVoltage : 0.f;
-        Motor.ThrustNewton = ThrustGrams * 0.001f * 9.81f * PropEfficiencyFactor;
+        Motor.ThrustNewton = ThrustGrams * 0.001f * 9.81f * PropEfficiencyFactor * MotorThrustScale;
         Motor.MechanicalPowerWatt = Motor.ElectricalPowerWatt * MotorMechanicalEfficiency;
 
         const float OmegaRad = FMath::Max(Motor.CurrentRPM * 2.f * PI / 60.f, MinOmegaRad);
@@ -730,6 +908,39 @@ void AFPVDronePawn::UpdateBatteryState(float TotalCurrentA, float DeltaTime)
     bBatteryLowVoltageWarn = CellLoadedVoltage <= BatteryCellVoltageWarn;
     bBatteryCriticalVoltage = CellLoadedVoltage <= BatteryCellVoltageCritical;
     bBatteryCutoffActive = CellLoadedVoltage <= BatteryCellVoltageCutoff;
+
+    static float BatteryAuditLogTimer = 0.f;
+    BatteryAuditLogTimer += DeltaTime;
+
+    if (BatteryAuditLogTimer >= 1.0f)
+    {
+        BatteryAuditLogTimer = 0.f;
+
+        
+        const float CellCurrentA = BatteryParallelCells > 0 ? BatteryTotalCurrentA / BatteryParallelCells : 0.f;
+        const float RemainingAh = FMath::Max(GetBatteryUsableCapacityAh() - BatteryConsumedAh, 0.f);
+        const float RemainingMinutes = BatteryTotalCurrentA > 0.1f ? RemainingAh / BatteryTotalCurrentA * 60.f : 0.f;
+        const float PackCRate = GetBatteryCapacityAh() > 0.1f ? BatteryTotalCurrentA / GetBatteryCapacityAh() : 0.f;
+
+        /*UE_LOG(LogTemp, Warning,
+            TEXT("BATTERY_AUDIT | SoC=%.2f Consumed=%.2fAh Rem=%.2fAh RemTime=%.1fmin | V=%.2f Cell=%.2f OCV=%.2f | I=%.1fA CellI=%.1fA C=%.1f | RScale=%.2f Out=%.2f Warn=%d Crit=%d Cut=%d"),
+            BatterySoC,
+            BatteryConsumedAh,
+            RemainingAh,
+            RemainingMinutes,
+            BatteryLoadedVoltage,
+            CellLoadedVoltage,
+            BatteryOpenCircuitVoltage,
+            BatteryTotalCurrentA,
+            CellCurrentA,
+            PackCRate,
+            BatteryResistanceScale,
+            BatteryOutputScale,
+            bBatteryLowVoltageWarn ? 1 : 0,
+            bBatteryCriticalVoltage ? 1 : 0,
+            bBatteryCutoffActive ? 1 : 0
+        );*/
+    }
 }
 
 float AFPVDronePawn::EvaluateBatteryResistanceScaleFromSoC(float SoC) const
@@ -770,7 +981,7 @@ void AFPVDronePawn::UpdateTelemetry()
 {
     Super::UpdateTelemetry();
 
-    Telemetry.FlightMode = TEXT("ACRO");
+    Telemetry.FlightMode = GetFlightModeText();
     Telemetry.PackVoltage = BatteryLoadedVoltage;
     Telemetry.CellVoltage = BatterySeriesCells > 0 ? BatteryLoadedVoltage / BatterySeriesCells : 0.f;
     Telemetry.ConsumedMah = BatteryConsumedAh * 1000.f;
@@ -778,6 +989,7 @@ void AFPVDronePawn::UpdateTelemetry()
     Telemetry.bBatteryValid = true;
     Telemetry.TxPowerW = VideoTxPowerW;
     Telemetry.bTxPowerValid = true;
+    Telemetry.Battery01 = FMath::Clamp(BatterySoC, 0.f, 1.f);
 }
 
 void AFPVDronePawn::ResetDroneStateAfterRespawn()
@@ -797,7 +1009,49 @@ void AFPVDronePawn::ResetDroneStateAfterRespawn()
     bBatteryLowVoltageWarn = false;
     bBatteryCriticalVoltage = false;
     bBatteryCutoffActive = false;
+    FlightMode = EFPVFlightMode::Acro;
 
     DebugLogTimer = 0.f;
     DebugState = FFPVDebugState();
+}
+
+void AFPVDronePawn::HandleCrashExplosion(const FHitResult& Hit)
+{
+    const FVector ExplosionLocation = Hit.ImpactPoint.IsNearlyZero() ? Hit.Location : Hit.ImpactPoint;
+    ApplyExplosionDamage(ExplosionLocation);
+}
+
+void AFPVDronePawn::ApplyExplosionDamage(FVector ExplosionLocation)
+{
+    if (!IsBombArmed())
+    {
+        return;
+    }
+
+    TArray<AActor*> IgnoredActors;
+    IgnoredActors.Add(this);
+
+    UGameplayStatics::ApplyRadialDamageWithFalloff(
+        this,
+        ExplosionDamage,
+        ExplosionMinimumDamage,
+        ExplosionLocation,
+        ExplosionInnerRadius,
+        ExplosionOuterRadius,
+        ExplosionDamageFalloff,
+        UDamageType::StaticClass(),
+        IgnoredActors,
+        this,
+        GetController(),
+        ECC_Visibility
+    );
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("[FPV EXPLOSION] Damage applied | Location=%s Damage=%.1f Min=%.1f Inner=%.1f Outer=%.1f"),
+        *ExplosionLocation.ToString(),
+        ExplosionDamage,
+        ExplosionMinimumDamage,
+        ExplosionInnerRadius,
+        ExplosionOuterRadius
+    );
 }

@@ -3,13 +3,61 @@
 #include "Components/CanvasPanel.h"
 #include "Slate/WidgetTransform.h"
 
+
 #include "Components/Image.h"
+#include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Components/RetainerBox.h"
 
 void UFPVHUDWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 {
 	//SetVisibility(InTelemetry.bKillCamActive ? ESlateVisibility::Hidden : ESlateVisibility::Visible);
+
+	if (Image_PitchArrow)
+	{
+		const float ClimbDeadbandMps = 0.1f;
+
+		if (InTelemetry.VerticalSpeedMps > ClimbDeadbandMps)
+		{
+			Image_PitchArrow->SetVisibility(ESlateVisibility::Visible);
+			Image_PitchArrow->SetRenderTransformAngle(0.f);
+
+			if (Text_PitchArrow)
+			{
+				Text_PitchArrow->SetVisibility(ESlateVisibility::Hidden);
+			}
+		}
+		else if (InTelemetry.VerticalSpeedMps < -ClimbDeadbandMps)
+		{
+			Image_PitchArrow->SetVisibility(ESlateVisibility::Visible);
+			Image_PitchArrow->SetRenderTransformAngle(180.f);
+
+			if (Text_PitchArrow)
+			{
+				Text_PitchArrow->SetVisibility(ESlateVisibility::Hidden);
+			}
+		}
+		else
+		{
+			Image_PitchArrow->SetVisibility(ESlateVisibility::Hidden);
+
+			if (Text_PitchArrow)
+			{
+				Text_PitchArrow->SetText(FText::FromString(TEXT("-")));
+				Text_PitchArrow->SetVisibility(ESlateVisibility::Visible);
+			}
+		}
+	}
+
+	if (BarPackBattery)
+	{
+		BarPackBattery->SetPercent(InTelemetry.bBatteryValid ? FMath::Clamp(InTelemetry.Battery01, 0.f, 1.f) : 0.f);
+	}
+
+	if (BarCellBattery)
+	{
+		BarCellBattery->SetPercent(InTelemetry.bBatteryValid ? FMath::Clamp(InTelemetry.Battery01, 0.f, 1.f) : 0.f);
+	}
 	if (Text_PrimaryLink)
 	{
 		if (InTelemetry.bControlLinkValid)
@@ -242,5 +290,27 @@ void UFPVHUDWidget::NativeConstruct()
 	if (Retainer_HUD)
 	{
 		HUDInterferenceMaterialInstance = Retainer_HUD->GetEffectMaterial();
+	}
+
+	if (!PitchArrowTexture)
+	{
+		PitchArrowTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/FPV/UI/arrow.arrow"));
+	}
+
+	if (Image_PitchArrow)
+	{
+		if (PitchArrowTexture)
+		{
+			Image_PitchArrow->SetBrushFromTexture(PitchArrowTexture, true);
+		}
+
+		Image_PitchArrow->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+		Image_PitchArrow->SetVisibility(ESlateVisibility::Hidden);
+	}
+
+	if (Text_PitchArrow)
+	{
+		Text_PitchArrow->SetText(FText::FromString(TEXT("-")));
+		Text_PitchArrow->SetVisibility(ESlateVisibility::Visible);
 	}
 }

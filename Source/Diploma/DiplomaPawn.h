@@ -61,6 +61,9 @@ struct FDroneTelemetry
 	FString FlightMode;
 
 	UPROPERTY(BlueprintReadOnly)
+	float Battery01 = 1.f;
+
+	UPROPERTY(BlueprintReadOnly)
 	float PackVoltage = 0.f;
 
 	UPROPERTY(BlueprintReadOnly)
@@ -435,7 +438,7 @@ protected:
 	void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor,
 		UPrimitiveComponent* OtherComp, FVector NormalImpulse,
 		const FHitResult& Hit);
-
+		virtual void HandleCrashExplosion(const FHitResult& Hit);
 	void ToggleArm();
 	void ToggleBombArm();
 

@@ -245,12 +245,14 @@ void ADiplomaPawn::NotifyHit(UPrimitiveComponent* MyComp, AActor* Other,
 		return;
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("CRASH NOTIFY HIT | Other=%s | Location=%s | Impulse=%s"),
+	UE_LOG(LogTemp, Warning, TEXT("CRASH NOTIFY HIT | Other=%s | Location=%s | Impulse=%s | Bomb=%d"),
 		Other ? *Other->GetName() : TEXT("None"),
 		*HitLocation.ToString(),
-		*NormalImpulse.ToString()
+		*NormalImpulse.ToString(),
+		bBombArmedState ? 1 : 0
 	);
 
+	HandleCrashExplosion(Hit);
 	HandleCrash(HitLocation);
 }
 
@@ -264,13 +266,19 @@ void ADiplomaPawn::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor,
 		return;
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("CRASH COMPONENT HIT | Other=%s | Impulse=%s | ImpactPoint=%s"),
+	UE_LOG(LogTemp, Warning, TEXT("CRASH COMPONENT HIT | Other=%s | Impulse=%s | ImpactPoint=%s | Bomb=%d"),
 		OtherActor ? *OtherActor->GetName() : TEXT("None"),
 		*NormalImpulse.ToString(),
-		*HitLocation.ToString()
+		*HitLocation.ToString(),
+		bBombArmedState ? 1 : 0
 	);
 
+	HandleCrashExplosion(Hit);
 	HandleCrash(HitLocation);
+}
+
+void ADiplomaPawn::HandleCrashExplosion(const FHitResult& Hit)
+{
 }
 
 
@@ -1472,30 +1480,29 @@ bool ADiplomaPawn::ShouldIgnoreCrashHit(const FVector& NormalImpulse) const
 		return true;
 	}
 
+	if (bCrashed)
+	{
+		return true;
+	}
+
 	const float Now = GetWorld()->GetTimeSeconds();
 	const float TimeSinceSpawn = Now - LastSpawnWorldTime;
+
+	if (TimeSinceSpawn < CrashSpawnGraceSeconds)
+	{
+		return true;
+	}
+
+	if (bBombArmedState)
+	{
+		return false;
+	}
 
 	const float SpeedMps = PlaneMesh->GetPhysicsLinearVelocity().Size() / 100.f;
 	const float ImpulseSize = NormalImpulse.Size();
 
-	if (TimeSinceSpawn < CrashSpawnGraceSeconds)
-	{
-		/*UE_LOG(LogTemp, Warning, TEXT("CRASH IGNORED | SpawnGrace=%.2f | Speed=%.2f m/s | Impulse=%.0f"),
-			TimeSinceSpawn,
-			SpeedMps,
-			ImpulseSize
-		);*/
-
-		return true;
-	}
-
 	if (SpeedMps < CrashMinImpactSpeedMps && ImpulseSize < CrashMinNormalImpulse)
 	{
-		/*UE_LOG(LogTemp, Warning, TEXT("CRASH IGNORED | WeakHit | Speed=%.2f m/s | Impulse=%.0f"),
-			SpeedMps,
-			ImpulseSize
-		);*/
-
 		return true;
 	}
 

@@ -5,6 +5,16 @@
 #include "DiplomaPawn.h"
 #include "FPVDronePawn.generated.h"
 
+
+UENUM(BlueprintType)
+enum class EFPVFlightMode : uint8
+{
+    Acro,
+    Angle,
+    Horizon,
+    AcroTrainer
+};
+
 USTRUCT(BlueprintType)
 struct FPIDController
 {
@@ -110,9 +120,20 @@ protected:
     virtual void ApplyTorques() override;
     virtual void UpdateTelemetry() override;
     virtual void ResetDroneStateAfterRespawn() override;
+    virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+    virtual void HandleCrashExplosion(const FHitResult& Hit) override;
 
 private:
 
+    //
+    UPROPERTY(EditAnywhere, Category = "FPV|Debug")
+    bool bLogFlightModeDebug = true;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Debug")
+    float FlightModeDebugInterval = 0.10f;
+
+    float FlightModeDebugTimer = 0.f;
+    //
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
     float AirDensity = 1.225f;
@@ -299,6 +320,57 @@ private:
     void UpdateBatteryState(float TotalCurrentA, float DeltaTime);
     float EvaluateBatteryResistanceScaleFromSoC(float SoC) const;
     float EvaluateBatteryOutputScaleFromCellVoltage(float CellLoadedVoltage) const;
+
+    //FlightModes
+
+    UPROPERTY(EditAnywhere, Category = "FPV|FlightMode")
+    EFPVFlightMode FlightMode = EFPVFlightMode::Acro;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|FlightMode")
+    float AngleMaxPitchDeg = 45.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|FlightMode")
+    float AngleMaxRollDeg = 45.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|FlightMode")
+    float AngleLevelGain = 8.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|FlightMode")
+    float HorizonTransitionStart = 0.35f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|FlightMode")
+    float HorizonTransitionEnd = 0.85f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|FlightMode")
+    float AcroTrainerMaxPitchDeg = 55.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|FlightMode")
+    float AcroTrainerMaxRollDeg = 55.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|FlightMode")
+    float AcroTrainerReturnGain = 10.f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Explosion")
+    float ExplosionDamage = 125.0f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Explosion")
+    float ExplosionMinimumDamage = 100.0f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Explosion")
+    float ExplosionInnerRadius = 250.0f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Explosion")
+    float ExplosionOuterRadius = 650.0f;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Explosion")
+    float ExplosionDamageFalloff = 1.0f;
+
+    void ApplyExplosionDamage(FVector ExplosionLocation);
+
+    void CycleFlightMode();
+    FString GetFlightModeText() const;
+    float ComputeAngleRateNorm(float TargetAngleDeg, float CurrentAngleDeg, float MaxRateDeg) const;
+    float ApplyAcroTrainerLimit(float TargetRateNorm, float CurrentAngleDeg, float LimitDeg, float MaxRateDeg) const;
 
     //debug
     FFPVDebugState DebugState;

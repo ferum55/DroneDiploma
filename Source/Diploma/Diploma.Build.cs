@@ -8,7 +8,7 @@ public class Diploma : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore","UMG" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore","UMG","AIModule","GameplayTasks","NavigationSystem" });
 
         PrivateDependencyModuleNames.AddRange(new string[]{"Slate","SlateCore"});
     }
