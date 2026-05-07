@@ -334,7 +334,7 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
         const float RollErrorDeg = TargetRollDeg - CurrentRollDeg;
         const float PitchErrorDeg = TargetPitchDeg - CurrentPitchDeg;
         bDidFlightModeDebugLog = true;
-        UE_LOG(LogTemp, Warning,
+        /*UE_LOG(LogTemp, Warning,
             TEXT("MODE_DBG | Mode=%s Thr=%.2f | In P=%.2f R=%.2f Y=%.2f | Ang P=%.1f R=%.1f | TgtAng P=%.1f R=%.1f | Err P=%+.1f R=%+.1f"),
             *GetFlightModeText(),
             BaseThrottle,
@@ -360,7 +360,7 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
             PitchCmd,
             RollCmd,
             YawCmd
-        );
+        );*/
     }
     //
     const float ArmMin = FMath::Min(ArmX, ArmY);
@@ -375,7 +375,7 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
     //
     if (bDidFlightModeDebugLog)
     {
-        UE_LOG(LogTemp, Warning,
+        /*UE_LOG(LogTemp, Warning,
             TEXT("MIX_DBG | PitchMix=%+.4f RollMix=%+.4f YawCmd=%+.4f | FL=%.3f FR=%.3f BL=%.3f BR=%.3f"),
             PitchMix,
             RollMix,
@@ -384,7 +384,7 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
             FR,
             BL,
             BR
-        );
+        );*/
     }
     //
 

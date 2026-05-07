@@ -1143,117 +1143,19 @@ void ADiplomaPawn::StartKillCam(const FVector& HitLocation)
 		return;
 	}
 
-	const float Now = GetWorld()->GetTimeSeconds();
-
-	FKillCamFrame ImpactFrame;
-	ImpactFrame.Time = Now;
-	ImpactFrame.Location = PlaneMesh->GetComponentLocation();
-	ImpactFrame.Rotation = PlaneMesh->GetComponentQuat();
-	KillCamFrames.Add(ImpactFrame);
-
-	if (KillCamFrames.Num() < 2)
-	{
-		KillCamReplayStartWorldTime = Now;
-		KillCamReplayEndWorldTime = Now;
-		KillCamReplayDuration = 0.1f;
-	}
-	else
-	{
-		KillCamReplayEndWorldTime = Now;
-		KillCamReplayStartWorldTime = FMath::Max(KillCamFrames[0].Time, Now - KillCamReplaySeconds);
-		KillCamReplayDuration = FMath::Max(KillCamReplayEndWorldTime - KillCamReplayStartWorldTime, 0.1f);
-	}
-
-	KillCamReplayTime = 0.f;
 	KillCamTimer = KillCamDuration;
+	KillCamReplayTime = 0.f;
+	KillCamReplayDuration = 0.f;
 
-	const FTransform StartTransform = SampleKillCamTransform(KillCamReplayStartWorldTime);
-	const FVector ReplayStartLocation = StartTransform.GetLocation();
-	const FVector ReplayEndLocation = HitLocation;
-	const FVector MidLocation = (ReplayStartLocation + ReplayEndLocation) * 0.5f;
-
-	FVector FlightDirection = (ReplayEndLocation - ReplayStartLocation).GetSafeNormal();
-
-	if (FlightDirection.IsNearlyZero())
-	{
-		FlightDirection = GetActorForwardVector();
-	}
-
-	FVector Side = FVector::CrossProduct(FlightDirection, FVector::UpVector).GetSafeNormal();
-
-	if (Side.IsNearlyZero())
-	{
-		Side = GetActorRightVector();
-	}
-
-	TArray<FVector> CandidateDirections;
-	CandidateDirections.Add(Side);
-	CandidateDirections.Add(-Side);
-	CandidateDirections.Add((Side + FlightDirection * -0.35f).GetSafeNormal());
-	CandidateDirections.Add((-Side + FlightDirection * -0.35f).GetSafeNormal());
-	CandidateDirections.Add((Side + FlightDirection * 0.35f).GetSafeNormal());
-	CandidateDirections.Add((-Side + FlightDirection * 0.35f).GetSafeNormal());
-
-	FCollisionQueryParams Params;
-	Params.AddIgnoredActor(this);
-
-	FVector BestCameraLocation = MidLocation + Side * KillCamDistance + FVector(0.f, 0.f, KillCamCameraHeight);
-	float BestScore = -1.f;
-
-	for (const FVector& Dir : CandidateDirections)
-	{
-		const FVector CandidateLocation = MidLocation + Dir * KillCamDistance + FVector(0.f, 0.f, KillCamCameraHeight);
-
-		FHitResult HitToMid;
-		FHitResult HitToImpact;
-
-		const bool bBlockedMid = GetWorld()->LineTraceSingleByChannel(
-			HitToMid,
-			CandidateLocation,
-			MidLocation,
-			ECC_Visibility,
-			Params
-		);
-
-		const bool bBlockedImpact = GetWorld()->LineTraceSingleByChannel(
-			HitToImpact,
-			CandidateLocation,
-			ReplayEndLocation,
-			ECC_Visibility,
-			Params
-		);
-
-		float Score = 0.f;
-
-		if (!bBlockedMid)
-		{
-			Score += 1.f;
-		}
-
-		if (!bBlockedImpact)
-		{
-			Score += 1.f;
-		}
-
-		Score += FVector::DotProduct(Dir, Side) * 0.2f;
-
-		if (Score > BestScore)
-		{
-			BestScore = Score;
-			BestCameraLocation = CandidateLocation;
-		}
-	}
-
-	KillCamLocation = BestCameraLocation;
+	CrashLocation = HitLocation;
+	KillCamLocation = HitLocation + FVector(0.f, 0.f, 1000.f);
 
 	KillCamCamera->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
-	
-	const FVector InitialLookTarget = bKillCamTrackDrone ? ReplayStartLocation : HitLocation;
-
 	KillCamCamera->SetWorldLocation(KillCamLocation);
 	KillCamCamera->SetWorldRotation(
-		(InitialLookTarget - KillCamLocation).GetSafeNormal().ToOrientationRotator()
+		(HitLocation - KillCamLocation).GetSafeNormal().ToOrientationRotator()
 	);
+
 	KillCamCamera->SetActive(true);
 	Camera->SetActive(false);
 
@@ -1261,23 +1163,22 @@ void ADiplomaPawn::StartKillCam(const FVector& HitLocation)
 	PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
 	PlaneMesh->SetSimulatePhysics(false);
 	PlaneMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	PlaneMesh->SetVisibility(true);
-
-	PlaneMesh->SetWorldLocationAndRotation(
-		StartTransform.GetLocation(),
-		StartTransform.GetRotation(),
-		false,
-		nullptr,
-		ETeleportType::TeleportPhysics
-	);
+	PlaneMesh->SetVisibility(false);
 
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
 		PC->SetViewTarget(this);
 	}
 
+	if (bKillCamExplosionPending && !bKillCamExplosionSpawned)
+	{
+		bKillCamExplosionSpawned = true;
+		SpawnCrashExplosion(CrashLocation);
+	}
+
 	bKillCamActive = true;
 }
+
 
 void ADiplomaPawn::EndKillCam()
 {
@@ -1407,72 +1308,27 @@ void ADiplomaPawn::SpawnCrashExplosion(const FVector& HitLocation)
 
 void ADiplomaPawn::UpdateKillCamReplay(float DeltaSeconds)
 {
-	if (!PlaneMesh)
+	if (!KillCamCamera)
 	{
 		EndKillCam();
 		return;
 	}
 
-	KillCamReplayTime += DeltaSeconds;
+	KillCamLocation = CrashLocation + FVector(0.f, 0.f, 1000.f);
 
-	const float Alpha = FMath::Clamp(
-		KillCamReplayTime / FMath::Max(KillCamReplayDuration, KINDA_SMALL_NUMBER),
-		0.f,
-		1.f
+	KillCamCamera->SetWorldLocation(KillCamLocation);
+	KillCamCamera->SetWorldRotation(
+		(CrashLocation - KillCamLocation).GetSafeNormal().ToOrientationRotator()
 	);
 
-	const float ReplayWorldTime = FMath::Lerp(
-		KillCamReplayStartWorldTime,
-		KillCamReplayEndWorldTime,
-		Alpha
-	);
+	KillCamTimer -= DeltaSeconds;
 
-	const FTransform ReplayTransform = SampleKillCamTransform(ReplayWorldTime);
-
-	PlaneMesh->SetWorldLocationAndRotation(
-		ReplayTransform.GetLocation(),
-		ReplayTransform.GetRotation(),
-		false,
-		nullptr,
-		ETeleportType::TeleportPhysics
-	);
-
-	if (KillCamCamera)
+	if (KillCamTimer <= 0.f)
 	{
-		const FVector LookTarget = bKillCamTrackDrone
-			? ReplayTransform.GetLocation()
-			: CrashLocation;
-
-		const FRotator TargetRotation =
-			(LookTarget - KillCamCamera->GetComponentLocation()).GetSafeNormal().ToOrientationRotator();
-
-		const FRotator NewRotation = FMath::RInterpTo(
-			KillCamCamera->GetComponentRotation(),
-			TargetRotation,
-			DeltaSeconds,
-			KillCamRotationInterpSpeed
-		);
-
-		KillCamCamera->SetWorldRotation(NewRotation);
-	}
-
-
-	if (Alpha >= 1.f)
-	{
-		if (bKillCamExplosionPending && !bKillCamExplosionSpawned)
-		{
-			bKillCamExplosionSpawned = true;
-			SpawnCrashExplosion(CrashLocation);
-		}
-
-		KillCamTimer -= DeltaSeconds;
-
-		if (KillCamTimer <= 0.f)
-		{
-			EndKillCam();
-		}
+		EndKillCam();
 	}
 }
+
 bool ADiplomaPawn::ShouldIgnoreCrashHit(const FVector& NormalImpulse) const
 {
 	if (!GetWorld() || !PlaneMesh)
