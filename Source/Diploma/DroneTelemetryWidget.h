@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "DiplomaPawn.h"
+#include "FPVDronePawn.h"
 #include "DroneTelemetryWidget.generated.h"
 
 class UTextBlock;

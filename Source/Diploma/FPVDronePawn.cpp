@@ -1,16 +1,90 @@
-﻿
-#include "FPVDronePawn.h"
+﻿#include "FPVDronePawn.h"
+#include "DroneSignalComponent.h"
+#include "FPVBatteryComponent.h"
+
+#include "UObject/ConstructorHelpers.h"
+#include "Camera/CameraComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/InputComponent.h"
+#include "Engine/World.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/Engine.h"
+#include "Engine/EngineTypes.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
-#include "Components/InputComponent.h"
+#include "Particles/ParticleSystem.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/DamageType.h"
+#include "GameFramework/PlayerController.h"
+
 
 AFPVDronePawn::AFPVDronePawn()
 {
+    PrimaryActorTick.bCanEverTick = true;
+
+    struct FConstructorStatics
+    {
+        ConstructorHelpers::FObjectFinderOptional<UStaticMesh> PlaneMesh;
+        FConstructorStatics()
+            : PlaneMesh(TEXT("/Game/Flying/Meshes/UFO.UFO"))
+        {
+        }
+    };
+    static FConstructorStatics ConstructorStatics;
+
+    PlaneMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PlaneMesh0"));
+    PlaneMesh->SetStaticMesh(ConstructorStatics.PlaneMesh.Get());
+    RootComponent = PlaneMesh;
+
+    PlaneMesh->SetNotifyRigidBodyCollision(true);
+    PlaneMesh->SetSimulatePhysics(true);
+    PlaneMesh->SetEnableGravity(true);
+    //PlaneMesh->SetLinearDamping(0.05f);
+    //PlaneMesh->SetAngularDamping(0.1f);
+    PlaneMesh->SetMassOverrideInKg(NAME_None, 4.5f);
+    PlaneMesh->SetCollisionProfileName(TEXT("PhysicsActor"));
+    PlaneMesh->SetCenterOfMass(FVector::ZeroVector);
+
+    Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera0"));
+    Camera->SetupAttachment(PlaneMesh);
+    Camera->bUsePawnControlRotation = false;
+    Camera->SetRelativeRotation(FRotator::ZeroRotator);
+    Camera->FieldOfView = 100.f;
+    Camera->SetRelativeLocation(FVector(0.f, 0.f, 0.f));
+
+    KillCamCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("KillCamCamera0"));
+    KillCamCamera->SetupAttachment(RootComponent);
+    KillCamCamera->bUsePawnControlRotation = false;
+    KillCamCamera->SetActive(false);
+
+    if (Camera)
+    {
+        if (Camera->PostProcessSettings.WeightedBlendables.Array.Num() > 0)
+        {
+            auto& Blendable = Camera->PostProcessSettings.WeightedBlendables.Array[0];
+
+            if (Blendable.Object)
+            {
+                FPVPostProcessMID = UMaterialInstanceDynamic::Create(
+                    Cast<UMaterialInterface>(Blendable.Object),
+                    this
+                );
+
+                Blendable.Object = FPVPostProcessMID;
+            }
+        }
+    }
+
+    BatteryComponent = CreateDefaultSubobject<UFPVBatteryComponent>(TEXT("BatteryComponent"));
+    SignalComponent = CreateDefaultSubobject<UDroneSignalComponent>(TEXT("SignalComponent"));
+
+    Throttle = 0.f;
+    PitchInput = 0.f;
+    RollInput = 0.f;
+    YawInput = 0.f;
+
     ArmX = 16.67f;
-    ArmY= 14.5f;
+    ArmY = 14.5f;
     MotorKV = 900.f;
     MotorResponseUpRPM = 14.f;
     MotorResponseDownRPM = 10.f;
@@ -35,26 +109,87 @@ AFPVDronePawn::AFPVDronePawn()
     YawPID.I = 0.f;
     YawPID.D = 0.075f;
     YawPID.IntegralClamp = 0.3f;
-
-    BatterySeriesCells = 6;
-    BatteryParallelCells = 3;
-    BatteryCellCapacityAh = 5.0f;
-    BatteryCellInternalResistanceOhm = 0.005f;
-    BatteryCellVoltageFull = 4.2f;
-    BatteryCellVoltageNominal = 3.6f;
-    BatteryCellVoltageEmpty = 3.0f;
-    BatteryUsableFraction = 0.85f;
-    BatteryBenchReferenceVoltage = 25.2f;
-    BatteryPackMassKg = 1.28f;
 }
+
 void AFPVDronePawn::BeginPlay()
 {
     Super::BeginPlay();
+
+    if (GEngine)
+    {
+        GEngine->Exec(GetWorld(), TEXT("stat fps"));
+        GEngine->Exec(GetWorld(), TEXT("stat unit"));
+    }
+
+    BaroZeroZ = GetActorLocation().Z;
+
+    if (SignalComponent)
+    {
+        SignalComponent->SetOperatorLocation(GetActorLocation());
+    }
+    TelemetryStartTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+    SpawnLocation = GetActorLocation();
+    SpawnRotation = GetActorRotation();
+    LastSpawnWorldTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+
+    if (APlayerController* PC = Cast<APlayerController>(GetController()))
+    {
+        PC->SetInputMode(FInputModeGameOnly());
+        PC->bShowMouseCursor = false;
+    }
+
+    if (!Camera)
+    {
+        UE_LOG(LogTemp, Error, TEXT("PP | Camera is null"));
+    }
+    else
+    {
+        const int32 Count = Camera->PostProcessSettings.WeightedBlendables.Array.Num();
+
+        UE_LOG(LogTemp, Warning, TEXT("PP | Blendables count: %d"), Count);
+
+        if (Count > 0)
+        {
+            FWeightedBlendable& Blendable = Camera->PostProcessSettings.WeightedBlendables.Array[0];
+            UObject* Obj = Blendable.Object;
+
+            UE_LOG(LogTemp, Warning,
+                TEXT("PP | Blendable[0]: %s | Class: %s"),
+                Obj ? *Obj->GetName() : TEXT("None"),
+                Obj ? *Obj->GetClass()->GetName() : TEXT("None")
+            );
+
+            UMaterialInterface* MaterialInterface = Cast<UMaterialInterface>(Obj);
+
+            if (MaterialInterface)
+            {
+                FPVPostProcessMID = UMaterialInstanceDynamic::Create(MaterialInterface, this);
+                Blendable.Object = FPVPostProcessMID;
+            }
+        }
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("PP | MID created: %s"),
+            FPVPostProcessMID ? TEXT("YES") : TEXT("NO")
+        );
+    }
+
     PitchPID.Reset();
     RollPID.Reset();
     YawPID.Reset();
-    ResetBatteryState();
-    InitMotors(); 
+
+    if (BatteryComponent)
+    {
+        BatteryComponent->ResetBatteryState();
+    }
+
+    if (SignalComponent)
+    {
+        SignalComponent->ResetSignalState();
+    }
+
+
+    InitMotors();
 
     //PlaneMesh->SetLinearDamping(0.f);
     //PlaneMesh->SetAngularDamping(0.2f);
@@ -93,7 +228,7 @@ void AFPVDronePawn::BeginPlay()
 
     UE_LOG(LogTemp, Warning, TEXT("Actor Rotation: %s"), *GetActorRotation().ToString());
     UE_LOG(LogTemp, Warning, TEXT("Mesh Rotation: %s"), *PlaneMesh->GetComponentRotation().ToString());
-    
+
 
     for (int i = 0; i < Motors.Num(); i++)
     {
@@ -103,14 +238,440 @@ void AFPVDronePawn::BeginPlay()
             Motors[i].LocalPosition.Y,
             Motors[i].LocalPosition.Z);
     }
-    MaxThrust = 0.f;
+
+    UE_LOG(LogTemp, Warning, TEXT("Actor: %s"), *GetName());
+    UE_LOG(LogTemp, Warning, TEXT("PlaneMesh Rel: %s  World: %s"),
+        *PlaneMesh->GetRelativeLocation().ToString(),
+        *PlaneMesh->GetComponentLocation().ToString());
+
+    UE_LOG(LogTemp, Warning, TEXT("Camera Rel: %s  World: %s  AttachParent: %s"),
+        *Camera->GetRelativeLocation().ToString(),
+        *Camera->GetComponentLocation().ToString(),
+        Camera->GetAttachParent() ? *Camera->GetAttachParent()->GetName() : TEXT("None"));
 }
 
 void AFPVDronePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
-    Super::SetupPlayerInputComponent(PlayerInputComponent);
+    check(PlayerInputComponent);
+    UE_LOG(LogTemp, Warning, TEXT("SetupPlayerInputComponent called for %s"), *GetName());
 
+    PlayerInputComponent->BindAxis("Throttle", this, &AFPVDronePawn::ThrottleInput);
+    PlayerInputComponent->BindAxis("Pitch", this, &AFPVDronePawn::PitchInputAxis);
+    PlayerInputComponent->BindAxis("Roll", this, &AFPVDronePawn::RollInputAxis);
+    PlayerInputComponent->BindAxis("Yaw", this, &AFPVDronePawn::YawInputAxis);
+
+    PlayerInputComponent->BindAction("Arm", IE_Pressed, this, &AFPVDronePawn::ToggleArm);
+    PlayerInputComponent->BindAction("BombArm", IE_Pressed, this, &AFPVDronePawn::ToggleBombArm);
     PlayerInputComponent->BindAction("CycleFlightMode", IE_Pressed, this, &AFPVDronePawn::CycleFlightMode);
+}
+
+void AFPVDronePawn::Tick(float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+
+    LastDeltaSeconds = DeltaSeconds;
+
+    if (bCrashed)
+    {
+        if (bKillCamActive)
+        {
+            UpdateKillCamReplay(DeltaSeconds);
+        }
+        return;
+    }
+
+    UpdateMotorThrusts(DeltaSeconds);
+    UpdateMotorDynamics(DeltaSeconds);
+    ApplyThrust();
+
+    UpdateTelemetry();
+}
+
+void AFPVDronePawn::NotifyHit(UPrimitiveComponent* MyComp, AActor* Other,
+    UPrimitiveComponent* OtherComp, bool bSelfMoved,
+    FVector HitLocation, FVector HitNormal,
+    FVector NormalImpulse, const FHitResult& Hit)
+{
+    Super::NotifyHit(MyComp, Other, OtherComp, bSelfMoved,
+        HitLocation, HitNormal, NormalImpulse, Hit);
+
+    if (ShouldIgnoreCrashHit(NormalImpulse))
+    {
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("CRASH NOTIFY HIT | Other=%s | Location=%s | Impulse=%s | Bomb=%d"),
+        Other ? *Other->GetName() : TEXT("None"),
+        *HitLocation.ToString(),
+        *NormalImpulse.ToString(),
+        bBombArmedState ? 1 : 0
+    );
+
+    HandleCrashExplosion(Hit);
+    HandleCrash(HitLocation);
+}
+
+void AFPVDronePawn::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
+{
+    const FVector HitLocation = Hit.ImpactPoint.IsNearlyZero() ? Hit.Location : Hit.ImpactPoint;
+
+    if (ShouldIgnoreCrashHit(NormalImpulse))
+    {
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("CRASH COMPONENT HIT | Other=%s | Impulse=%s | ImpactPoint=%s | Bomb=%d"),
+        OtherActor ? *OtherActor->GetName() : TEXT("None"),
+        *NormalImpulse.ToString(),
+        *HitLocation.ToString(),
+        bBombArmedState ? 1 : 0
+    );
+
+    HandleCrashExplosion(Hit);
+    HandleCrash(HitLocation);
+}
+
+void AFPVDronePawn::ToggleArm()
+{
+    if (bCrashed || bKillCamActive)
+    {
+        return;
+    }
+
+    bArmedState = !bArmedState;
+
+    if (!bArmedState)
+    {
+        Throttle = 0.f;
+
+        if (SignalComponent)
+        {
+            SignalComponent->ResetSignalState();
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Armed: %d"), bArmedState ? 1 : 0);
+}
+
+void AFPVDronePawn::ToggleBombArm()
+{
+    if (bCrashed || bKillCamActive)
+    {
+        return;
+    }
+
+    bBombArmedState = !bBombArmedState;
+
+    UE_LOG(LogTemp, Warning, TEXT("BombArmed: %d"), bBombArmedState ? 1 : 0);
+}
+
+void AFPVDronePawn::PitchInputAxis(float Value)
+{
+    PitchInput = NormalizeCenteredAxis(Value); //NormalizeCenteredAxis(Value, 0.654f);
+}
+
+void AFPVDronePawn::RollInputAxis(float Value)
+{
+    RollInput = NormalizeCenteredAxis(Value); //NormalizeCenteredAxis(Value, 0.654f);
+}
+
+void AFPVDronePawn::YawInputAxis(float Value)
+{
+    YawInput = NormalizeCenteredAxis(Value);//NormalizeCenteredAxis(Value, 0.665f);
+}
+
+void AFPVDronePawn::ThrottleInput(float Value)
+{
+    //UE_LOG(LogTemp, Warning, TEXT("Throttle axis value: %.3f"), Value);
+
+    Throttle = NormalizeThrottle(Value);
+    /*UE_LOG(LogTemp, Warning, TEXT("Throttle state: %.3f"), Throttle);*/
+}
+
+void AFPVDronePawn::UpdateBaseTelemetry()
+{
+    if (!PlaneMesh)
+    {
+        return;
+    }
+
+    const FVector Velocity = PlaneMesh->GetPhysicsLinearVelocity();
+
+    Telemetry.Throttle01 = Throttle;
+    Telemetry.ThrottlePercent = Throttle * 100.f;
+    Telemetry.SpeedMps = Velocity.Size() / 100.f;
+    Telemetry.SpeedKmh = Telemetry.SpeedMps * 3.6f;
+    Telemetry.VerticalSpeedMps = Velocity.Z / 100.f;
+    Telemetry.BaroAltitudeM = GetActorLocation().Z / 100.f;
+    Telemetry.RelativeAltitudeM = (GetActorLocation().Z - BaroZeroZ) / 100.f;
+
+    bool bValid = false;
+    Telemetry.RadioAltitudeM = GetRadioAltitudeMeters(bValid);
+    Telemetry.bRadioAltitudeValid = bValid;
+
+    const FRotator R = GetActorRotation();
+    Telemetry.PitchDeg = R.Pitch;
+    Telemetry.RollDeg = R.Roll;
+    Telemetry.YawDeg = R.Yaw;
+    Telemetry.HeadingDeg = FRotator::ClampAxis(R.Yaw);
+
+    Telemetry.FlightTimeSeconds = GetWorld()
+        ? (GetWorld()->GetTimeSeconds() - TelemetryStartTimeSeconds)
+        : 0.f;
+
+    Telemetry.bArmed = bArmedState;
+    Telemetry.FlightMode = TEXT("");
+
+    Telemetry.PackVoltage = 0.f;
+    Telemetry.CellVoltage = 0.f;
+    Telemetry.ConsumedMah = 0.f;
+    Telemetry.CurrentAmp = 0.f;
+    Telemetry.bBatteryValid = false;
+
+    Telemetry.PrimaryLinkPercent = 0.f;
+    Telemetry.bPrimaryLinkValid = false;
+
+    Telemetry.VideoLinkPercent = 0.f;
+    Telemetry.bVideoLinkValid = false;
+
+
+    Telemetry.bBombArmed = bBombArmedState;
+    Telemetry.bKillCamActive = bKillCamActive;
+    Telemetry.bCrashed = bCrashed;
+
+    UpdateSignalTelemetry(LastDeltaSeconds);
+}
+
+float AFPVDronePawn::GetRadioAltitudeMeters(bool& bValid) const
+{
+    if (!GetWorld() || !PlaneMesh)
+    {
+        bValid = false;
+        return 0.f;
+    }
+
+    FHitResult Hit;
+    const FVector Start = PlaneMesh->GetComponentLocation();
+    const FVector End = Start - FVector(0.f, 0.f, 100000.f);
+
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(this);
+
+    const bool bHit = GetWorld()->LineTraceSingleByChannel(
+        Hit,
+        Start,
+        End,
+        ECC_Visibility,
+        Params
+    );
+
+    bValid = bHit;
+    return bHit ? Hit.Distance / 100.f : 0.f;
+}
+
+float AFPVDronePawn::NormalizeThrottle(float Raw) const
+{
+    // Axis4: мінімум=0.0, центр=0.5, максимум=1.0
+    // Мапимо [0..1] ? [0..1], центр не має значення для тяги
+    const float Min = 0.15f;
+    const float Max = 0.85f;
+    float Value = (Raw - Min) / (Max - Min);
+    Value = FMath::Clamp(Value, 0.f, 1.f);
+    if (Value < 0.02f) Value = 0.f;
+    return Value;
+}
+
+float AFPVDronePawn::NormalizeCenteredAxis(float Raw) const
+{
+    // Axis: мінімум=0.0, центр=0.5, максимум=1.0
+    // Мапимо [0..1] ? [-1..1] відносно центру 0.5
+    float Value = (Raw - 0.5f) * 2.0f;
+    Value = FMath::Clamp(Value, -1.f, 1.f);
+    const float DeadZone = 0.04f;
+    if (FMath::Abs(Value) < DeadZone) Value = 0.f;
+    return Value;
+}
+
+void AFPVDronePawn::UpdateSignalTelemetry(float DeltaTime)
+{
+    if (!SignalComponent)
+    {
+        return;
+    }
+
+    SignalComponent->UpdateSignalTelemetry(
+        DeltaTime,
+        PlaneMesh,
+        Throttle,
+        PitchInput,
+        RollInput,
+        YawInput,
+        Telemetry,
+        FPVPostProcessMID
+    );
+}
+
+void AFPVDronePawn::HandleCrash(const FVector& HitLocation)
+{
+    if (bCrashed)
+    {
+        return;
+    }
+
+    bCrashed = true;
+    CrashLocation = HitLocation;
+    bKillCamExplosionPending = bBombArmedState;
+    bKillCamExplosionSpawned = false;
+
+    StartKillCam(HitLocation);
+}
+
+void AFPVDronePawn::SpawnCrashExplosion(const FVector& HitLocation)
+{
+    if (!ExplosionEffect || !GetWorld())
+    {
+        return;
+    }
+
+    UGameplayStatics::SpawnEmitterAtLocation(
+        GetWorld(),
+        ExplosionEffect,
+        HitLocation,
+        FRotator::ZeroRotator,
+        FVector(1.f)
+    );
+}
+
+bool AFPVDronePawn::ShouldIgnoreCrashHit(const FVector& NormalImpulse) const
+{
+    if (!GetWorld() || !PlaneMesh)
+    {
+        return true;
+    }
+
+    if (bCrashed)
+    {
+        return true;
+    }
+
+    const float Now = GetWorld()->GetTimeSeconds();
+    const float TimeSinceSpawn = Now - LastSpawnWorldTime;
+
+    if (TimeSinceSpawn < CrashSpawnGraceSeconds)
+    {
+        return true;
+    }
+
+    if (bBombArmedState)
+    {
+        return false;
+    }
+
+    const float SpeedMps = PlaneMesh->GetPhysicsLinearVelocity().Size() / 100.f;
+    const float ImpulseSize = NormalImpulse.Size();
+
+    if (SpeedMps < CrashMinImpactSpeedMps && ImpulseSize < CrashMinNormalImpulse)
+    {
+        return true;
+    }
+
+    return false;
+}
+
+void AFPVDronePawn::StartKillCam(const FVector& HitLocation)
+{
+    if (!GetWorld() || !PlaneMesh || !Camera || !KillCamCamera)
+    {
+        return;
+    }
+
+    KillCamTimer = KillCamDuration;
+
+    CrashLocation = HitLocation;
+    KillCamLocation = HitLocation + FVector(0.f, 0.f, 1000.f);
+
+    KillCamCamera->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+    KillCamCamera->SetWorldLocation(KillCamLocation);
+    KillCamCamera->SetWorldRotation(
+        (HitLocation - KillCamLocation).GetSafeNormal().ToOrientationRotator()
+    );
+
+    KillCamCamera->SetActive(true);
+    Camera->SetActive(false);
+
+    PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+    PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+    PlaneMesh->SetSimulatePhysics(false);
+    PlaneMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    PlaneMesh->SetVisibility(false);
+
+    if (APlayerController* PC = Cast<APlayerController>(GetController()))
+    {
+        PC->SetViewTarget(this);
+    }
+
+    if (bKillCamExplosionPending && !bKillCamExplosionSpawned)
+    {
+        bKillCamExplosionSpawned = true;
+        SpawnCrashExplosion(CrashLocation);
+    }
+
+    bKillCamActive = true;
+}
+
+void AFPVDronePawn::EndKillCam()
+{
+    bKillCamActive = false;
+    KillCamCamera->SetActive(false);
+    Camera->SetActive(true);
+
+    PlaneMesh->SetVisibility(true);
+    PlaneMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    PlaneMesh->SetSimulatePhysics(true);
+
+    SetActorLocation(SpawnLocation);
+    SetActorRotation(SpawnRotation);
+
+    PlaneMesh->SetWorldLocationAndRotation(
+        SpawnLocation,
+        SpawnRotation,
+        false,
+        nullptr,
+        ETeleportType::TeleportPhysics
+    );
+
+    PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+    PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+
+    LastSpawnWorldTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+
+    bCrashed = false;
+
+    ResetDroneStateAfterRespawn();
+}
+
+void AFPVDronePawn::UpdateKillCamReplay(float DeltaSeconds)
+{
+    if (!KillCamCamera)
+    {
+        EndKillCam();
+        return;
+    }
+
+    KillCamLocation = CrashLocation + FVector(0.f, 0.f, 1000.f);
+
+    KillCamCamera->SetWorldLocation(KillCamLocation);
+    KillCamCamera->SetWorldRotation(
+        (CrashLocation - KillCamLocation).GetSafeNormal().ToOrientationRotator()
+    );
+
+    KillCamTimer -= DeltaSeconds;
+
+    if (KillCamTimer <= 0.f)
+    {
+        EndKillCam();
+    }
 }
 
 void AFPVDronePawn::CycleFlightMode()
@@ -155,6 +716,7 @@ float AFPVDronePawn::ComputeAngleRateNorm(float TargetAngleDeg, float CurrentAng
 
     return TargetRateDeg / FMath::Max(MaxRateDeg, KINDA_SMALL_NUMBER);
 }
+
 float AFPVDronePawn::ApplyAcroTrainerLimit(float TargetRateNorm, float CurrentAngleDeg, float LimitDeg, float MaxRateDeg) const
 {
     const float AbsAngle = FMath::Abs(CurrentAngleDeg);
@@ -181,27 +743,6 @@ void AFPVDronePawn::ApplyThrust()
     ApplyMotorForces();
     ApplyAerodynamicDrag();
 }
-
-void AFPVDronePawn::Tick(float DeltaSeconds)
-{
-    Super::Tick(DeltaSeconds);
-
-    if (bCrashed)
-    {
-        return;
-    }
-
-    UpdateMotorThrusts(DeltaSeconds);
-    UpdateMotorDynamics(DeltaSeconds);
-    ApplyThrust();
-
-    UpdateTelemetry();
-}
-
-void AFPVDronePawn::ApplyTorques()
-{
-}
-
 
 void AFPVDronePawn::InitMotors()
 {
@@ -241,6 +782,7 @@ void AFPVDronePawn::UpdateMotorThrusts(float DeltaTime)
         return;
     }
 
+    
     const float BaseThrottle = FMath::Clamp(GetReceivedThrottle(), 0.f, 1.f);
 
     if (!IsArmed())
@@ -650,9 +1192,9 @@ void AFPVDronePawn::ApplyAerodynamicDrag()
             NetHorizN,
             TotalCdA,
             DragMagnitudeN,
-            BatteryTotalCurrentA,
+            GetBatteryTotalCurrentA(),
             TotalPowerW,
-            BatteryLoadedVoltage
+            GetBatteryLoadedVoltage()
         );*/
     }
 }
@@ -664,6 +1206,10 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
     {
         return;
     }
+    
+    const float CurrentBatteryLoadedVoltage = BatteryComponent ? BatteryComponent->GetLoadedVoltage() : 25.2f;
+    const float CurrentBatteryOutputScale = BatteryComponent ? BatteryComponent->GetOutputScale() : 1.f;
+    const float CurrentBatteryBenchReferenceVoltage = BatteryComponent ? BatteryComponent->GetBenchReferenceVoltage() : 25.2f;
 
     static const TArray<float> ThrottlePts = { 0.f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f };
     static const TArray<float> RpmFromThrottlePts = { 0.f, 9097.f, 10518.f, 11816.f, 12897.f, 13765.f, 14404.f };
@@ -709,8 +1255,8 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
         {
             const float C = FMath::Clamp(Command, 0.f, 1.f);
             const float BaseRPM = InterpCurve(ThrottlePts, RpmFromThrottlePts, C);
-            const float VoltageScale = BatteryLoadedVoltage / FMath::Max(BatteryBenchReferenceVoltage, KINDA_SMALL_NUMBER);
-            return BaseRPM * VoltageScale * BatteryOutputScale;
+            const float VoltageScale = CurrentBatteryLoadedVoltage / FMath::Max(CurrentBatteryBenchReferenceVoltage, KINDA_SMALL_NUMBER);
+            return BaseRPM * VoltageScale * CurrentBatteryOutputScale;
         };
 
     auto EvaluatePowerFromRPM = [&](float RPM) -> float
@@ -778,7 +1324,7 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
         const float ThrustGrams = EvaluateThrustFromRPM(Motor.CurrentRPM);
 
         Motor.ElectricalPowerWatt = ElectricalPower;
-        Motor.CurrentDrawAmp = BatteryLoadedVoltage > KINDA_SMALL_NUMBER ? ElectricalPower / BatteryLoadedVoltage : 0.f;
+        Motor.CurrentDrawAmp = CurrentBatteryLoadedVoltage > KINDA_SMALL_NUMBER ? ElectricalPower / CurrentBatteryLoadedVoltage : 0.f;
         Motor.ThrustNewton = ThrustGrams * 0.001f * 9.81f * PropEfficiencyFactor * MotorThrustScale;
         Motor.MechanicalPowerWatt = Motor.ElectricalPowerWatt * MotorMechanicalEfficiency;
 
@@ -791,7 +1337,11 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
         AvgRPM += Motor.CurrentRPM;
     }
     AvgRPM = Motors.Num() > 0 ? AvgRPM / Motors.Num() : 0.f;
-    UpdateBatteryState(TotalCurrentA, DeltaTime);
+    
+    if (BatteryComponent)
+    {
+        BatteryComponent->UpdateBatteryState(TotalCurrentA, DeltaTime);
+    }
 
     /*static float MotorLogTimer = 0.f;
     MotorLogTimer += DeltaTime;
@@ -809,7 +1359,7 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
             WeightN,
             TotalElectricalPowerW,
             TotalCurrentA,
-            BatteryLoadedVoltage
+            CurrentBatteryLoadedVoltage
         );
 
         UE_LOG(LogTemp, Warning,
@@ -826,194 +1376,6 @@ void AFPVDronePawn::UpdateMotorDynamics(float DeltaTime)
     }*/
 }
 
-float AFPVDronePawn::GetBatteryCapacityAh() const
-{
-    return BatteryParallelCells * BatteryCellCapacityAh;
-}
-
-float AFPVDronePawn::GetBatteryUsableCapacityAh() const
-{
-    return GetBatteryCapacityAh() * BatteryUsableFraction;
-}
-
-float AFPVDronePawn::GetBatteryInternalResistanceOhm() const
-{
-    return BatterySeriesCells * (BatteryCellInternalResistanceOhm / FMath::Max(BatteryParallelCells, 1));
-}
-
-float AFPVDronePawn::EvaluateCellOCVFromSoC(float SoC) const
-{
-    static const TArray<float> SocPts = { 0.0f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f };
-    static const TArray<float> VoltPts = { 3.00f, 3.40f, 3.55f, 3.65f, 3.70f, 3.75f, 3.80f, 3.87f, 3.95f, 4.08f, 4.20f };
-
-    const float S = FMath::Clamp(SoC, 0.f, 1.f);
-
-    if (S <= SocPts[0])
-    {
-        return VoltPts[0];
-    }
-
-    const int32 Last = SocPts.Num() - 1;
-    if (S >= SocPts[Last])
-    {
-        return VoltPts[Last];
-    }
-
-    for (int32 i = 0; i < Last; ++i)
-    {
-        if (S >= SocPts[i] && S <= SocPts[i + 1])
-        {
-            const float Alpha = (S - SocPts[i]) / (SocPts[i + 1] - SocPts[i]);
-            return FMath::Lerp(VoltPts[i], VoltPts[i + 1], Alpha);
-        }
-    }
-
-    return VoltPts[Last];
-}
-
-void AFPVDronePawn::ResetBatteryState()
-{
-    BatteryConsumedAh = 0.f;
-    BatterySoC = 1.f;
-    BatteryOpenCircuitVoltage = BatterySeriesCells * BatteryCellVoltageFull;
-    BatteryLoadedVoltage = BatteryOpenCircuitVoltage;
-    BatteryTotalCurrentA = 0.f;
-}
-
-void AFPVDronePawn::UpdateBatteryState(float TotalCurrentA, float DeltaTime)
-{
-    BatteryTotalCurrentA = FMath::Max(TotalCurrentA, 0.f);
-
-    BatteryConsumedAh = FMath::Clamp(
-        BatteryConsumedAh + BatteryTotalCurrentA * DeltaTime / 3600.f,
-        0.f,
-        GetBatteryUsableCapacityAh()
-    );
-
-    BatterySoC = 1.f - BatteryConsumedAh / FMath::Max(GetBatteryUsableCapacityAh(), KINDA_SMALL_NUMBER);
-
-    BatteryOpenCircuitVoltage = EvaluateCellOCVFromSoC(BatterySoC) * BatterySeriesCells;
-
-    BatteryResistanceScale = EvaluateBatteryResistanceScaleFromSoC(BatterySoC);
-    const float EffectiveResistanceOhm = GetBatteryInternalResistanceOhm() * BatteryResistanceScale;
-
-    const float SagVoltage = BatteryTotalCurrentA * EffectiveResistanceOhm;
-    const float MinPackVoltage = BatterySeriesCells * BatteryCellVoltageCutoff;
-
-    BatteryLoadedVoltage = FMath::Max(BatteryOpenCircuitVoltage - SagVoltage, MinPackVoltage);
-
-    const float CellLoadedVoltage = BatteryLoadedVoltage / FMath::Max(BatterySeriesCells, 1);
-    BatteryOutputScale = EvaluateBatteryOutputScaleFromCellVoltage(CellLoadedVoltage);
-
-    bBatteryLowVoltageWarn = CellLoadedVoltage <= BatteryCellVoltageWarn;
-    bBatteryCriticalVoltage = CellLoadedVoltage <= BatteryCellVoltageCritical;
-    bBatteryCutoffActive = CellLoadedVoltage <= BatteryCellVoltageCutoff;
-
-    static float BatteryAuditLogTimer = 0.f;
-    BatteryAuditLogTimer += DeltaTime;
-
-    if (BatteryAuditLogTimer >= 1.0f)
-    {
-        BatteryAuditLogTimer = 0.f;
-
-        
-        const float CellCurrentA = BatteryParallelCells > 0 ? BatteryTotalCurrentA / BatteryParallelCells : 0.f;
-        const float RemainingAh = FMath::Max(GetBatteryUsableCapacityAh() - BatteryConsumedAh, 0.f);
-        const float RemainingMinutes = BatteryTotalCurrentA > 0.1f ? RemainingAh / BatteryTotalCurrentA * 60.f : 0.f;
-        const float PackCRate = GetBatteryCapacityAh() > 0.1f ? BatteryTotalCurrentA / GetBatteryCapacityAh() : 0.f;
-
-        /*UE_LOG(LogTemp, Warning,
-            TEXT("BATTERY_AUDIT | SoC=%.2f Consumed=%.2fAh Rem=%.2fAh RemTime=%.1fmin | V=%.2f Cell=%.2f OCV=%.2f | I=%.1fA CellI=%.1fA C=%.1f | RScale=%.2f Out=%.2f Warn=%d Crit=%d Cut=%d"),
-            BatterySoC,
-            BatteryConsumedAh,
-            RemainingAh,
-            RemainingMinutes,
-            BatteryLoadedVoltage,
-            CellLoadedVoltage,
-            BatteryOpenCircuitVoltage,
-            BatteryTotalCurrentA,
-            CellCurrentA,
-            PackCRate,
-            BatteryResistanceScale,
-            BatteryOutputScale,
-            bBatteryLowVoltageWarn ? 1 : 0,
-            bBatteryCriticalVoltage ? 1 : 0,
-            bBatteryCutoffActive ? 1 : 0
-        );*/
-    }
-}
-
-float AFPVDronePawn::EvaluateBatteryResistanceScaleFromSoC(float SoC) const
-{
-    const float S = FMath::Clamp(SoC, 0.f, 1.f);
-
-    if (S >= 0.30f)
-    {
-        return 1.f;
-    }
-
-    const float Alpha = S / 0.30f;
-    return FMath::Lerp(1.6f, 1.f, Alpha);
-}
-
-float AFPVDronePawn::EvaluateBatteryOutputScaleFromCellVoltage(float CellLoadedVoltage) const
-{
-    if (CellLoadedVoltage <= BatteryCellVoltageCutoff)
-    {
-        return 0.f;
-    }
-
-    if (CellLoadedVoltage >= BatteryCellVoltageCritical)
-    {
-        return 1.f;
-    }
-
-    return FMath::Clamp(
-        (CellLoadedVoltage - BatteryCellVoltageCutoff) /
-        FMath::Max(BatteryCellVoltageCritical - BatteryCellVoltageCutoff, KINDA_SMALL_NUMBER),
-        0.f,
-        1.f
-    );
-}
-
-
-void AFPVDronePawn::UpdateTelemetry()
-{
-    Super::UpdateTelemetry();
-
-    Telemetry.FlightMode = GetFlightModeText();
-    Telemetry.PackVoltage = BatteryLoadedVoltage;
-    Telemetry.CellVoltage = BatterySeriesCells > 0 ? BatteryLoadedVoltage / BatterySeriesCells : 0.f;
-    Telemetry.ConsumedMah = BatteryConsumedAh * 1000.f;
-    Telemetry.CurrentAmp = BatteryTotalCurrentA;
-    Telemetry.bBatteryValid = true;
-    Telemetry.TxPowerW = VideoTxPowerW;
-    Telemetry.bTxPowerValid = true;
-    Telemetry.Battery01 = FMath::Clamp(BatterySoC, 0.f, 1.f);
-}
-
-void AFPVDronePawn::ResetDroneStateAfterRespawn()
-{
-    Super::ResetDroneStateAfterRespawn();
-
-    PitchPID.Reset();
-    RollPID.Reset();
-    YawPID.Reset();
-
-    ResetBatteryState();
-    InitMotors();
-
-    BatteryTotalCurrentA = 0.f;
-    BatteryOutputScale = 1.f;
-    BatteryResistanceScale = 1.f;
-    bBatteryLowVoltageWarn = false;
-    bBatteryCriticalVoltage = false;
-    bBatteryCutoffActive = false;
-    FlightMode = EFPVFlightMode::Acro;
-
-    DebugLogTimer = 0.f;
-    DebugState = FFPVDebugState();
-}
 
 void AFPVDronePawn::HandleCrashExplosion(const FHitResult& Hit)
 {
@@ -1054,4 +1416,123 @@ void AFPVDronePawn::ApplyExplosionDamage(FVector ExplosionLocation)
         ExplosionInnerRadius,
         ExplosionOuterRadius
     );
+}
+
+void AFPVDronePawn::UpdateTelemetry()
+{
+    UpdateBaseTelemetry();
+
+    Telemetry.FlightMode = GetFlightModeText();
+    
+    
+
+    if (BatteryComponent)
+    {
+        Telemetry.PackVoltage = BatteryComponent->GetLoadedVoltage();
+        Telemetry.CellVoltage = BatteryComponent->GetCellVoltage();
+        Telemetry.ConsumedMah = BatteryComponent->GetConsumedAh() * 1000.f;
+        Telemetry.CurrentAmp = BatteryComponent->GetTotalCurrentA();
+        Telemetry.Battery01 = FMath::Clamp(BatteryComponent->GetSoC(), 0.f, 1.f);
+        Telemetry.bBatteryValid = true;
+    }
+    else
+    {
+        Telemetry.PackVoltage = 0.f;
+        Telemetry.CellVoltage = 0.f;
+        Telemetry.ConsumedMah = 0.f;
+        Telemetry.CurrentAmp = 0.f;
+        Telemetry.Battery01 = 0.f;
+        Telemetry.bBatteryValid = false;
+    }
+
+    if (!SignalComponent)
+    {
+        Telemetry.TxPowerW = 0.f;
+        Telemetry.bTxPowerValid = false;
+    }
+}
+
+void AFPVDronePawn::ResetDroneStateAfterRespawn()
+{
+    Throttle = 0.f;
+    PitchInput = 0.f;
+    RollInput = 0.f;
+    YawInput = 0.f;
+
+    bArmedState = false;
+    bBombArmedState = false;
+
+    BaroZeroZ = GetActorLocation().Z;
+    TelemetryStartTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+
+    PitchPID.Reset();
+    RollPID.Reset();
+    YawPID.Reset();
+
+    if (BatteryComponent)
+    {
+        BatteryComponent->ResetBatteryState();
+    }
+
+
+    if (SignalComponent)
+    {
+        SignalComponent->ResetSignalState();
+    }
+
+    InitMotors();
+
+
+    FlightMode = EFPVFlightMode::Acro;
+
+    DebugLogTimer = 0.f;
+    DebugState = FFPVDebugState();
+
+    Telemetry = FDroneTelemetry();
+    UpdateTelemetry();
+}
+
+float AFPVDronePawn::GetBatteryLoadedVoltage() const
+{
+    return BatteryComponent ? BatteryComponent->GetLoadedVoltage() : 0.f;
+}
+
+float AFPVDronePawn::GetBatteryConsumedAh() const
+{
+    return BatteryComponent ? BatteryComponent->GetConsumedAh() : 0.f;
+}
+
+float AFPVDronePawn::GetBatteryTotalCurrentA() const
+{
+    return BatteryComponent ? BatteryComponent->GetTotalCurrentA() : 0.f;
+}
+
+float AFPVDronePawn::GetReceivedThrottle() const
+{
+    return SignalComponent ? SignalComponent->GetReceivedThrottle() : 0.f;
+}
+
+float AFPVDronePawn::GetReceivedPitchInput() const
+{
+    return SignalComponent ? SignalComponent->GetReceivedPitchInput() : 0.f;
+}
+
+float AFPVDronePawn::GetReceivedRollInput() const
+{
+    return SignalComponent ? SignalComponent->GetReceivedRollInput() : 0.f;
+}
+
+float AFPVDronePawn::GetReceivedYawInput() const
+{
+    return SignalComponent ? SignalComponent->GetReceivedYawInput() : 0.f;
+}
+
+float AFPVDronePawn::GetControlInputScale() const
+{
+    return SignalComponent ? SignalComponent->GetControlInputScale() : 1.f;
+}
+
+bool AFPVDronePawn::IsControlFailsafeActive() const
+{
+    return SignalComponent ? SignalComponent->IsControlFailsafeActive() : false;
 }

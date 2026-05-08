@@ -1,5 +1,5 @@
 #include "DiplomaHUD.h"
-#include "DiplomaPawn.h"
+#include "FPVDronePawn.h"
 #include "FPVHUDWidget.h"
 
 void ADiplomaHUD::BeginPlay()
@@ -23,7 +23,7 @@ void ADiplomaHUD::DrawHUD()
 {
 	Super::DrawHUD();
 
-	ADiplomaPawn* Pawn = Cast<ADiplomaPawn>(GetOwningPawn());
+	AFPVDronePawn* Pawn = Cast<AFPVDronePawn>(GetOwningPawn());
 	if (!Pawn || !FPVHUDWidget)
 	{
 		return;
@@ -47,7 +47,7 @@ void ADiplomaHUD::DrawHUD()
 //{
 //	Super::DrawHUD();
 //
-//	ADiplomaPawn* Pawn = Cast<ADiplomaPawn>(GetOwningPawn());
+//	AFPVDronePawn* Pawn = Cast<AFPVDronePawn>(GetOwningPawn());
 //	if (!Pawn || !FPVHUDWidget)
 //	{
 //		return;

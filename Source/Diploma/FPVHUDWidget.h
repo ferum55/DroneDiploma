@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "DiplomaPawn.h"
+#include "DroneTelemetry.h"
 #include "Components/Image.h"
 #include "Components/ProgressBar.h"
 #include "Engine/Texture2D.h"
@@ -88,6 +88,9 @@ protected:
 
 	UPROPERTY(meta = (BindWidget))
 	UProgressBar* BarCellBattery = nullptr;
+
+	UPROPERTY(meta = (BindWidgetOptional))
+	UTextBlock* Text_Speed;
 
 	UPROPERTY(EditAnywhere, Category = "HUD")
 	float CameraPitchOffsetDeg = 20.f;

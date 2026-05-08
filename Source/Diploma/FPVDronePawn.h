@@ -1,9 +1,18 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "Misc/AssertionMacros.h"
-#include "DiplomaPawn.h"
+#include "GameFramework/Pawn.h"
+#include "Engine/EngineTypes.h"
+#include "DroneTelemetry.h"
 #include "FPVDronePawn.generated.h"
+
+class UCameraComponent;
+class UStaticMeshComponent;
+class UInputComponent;
+class UMaterialInstanceDynamic;
+class UParticleSystem;
+class UFPVBatteryComponent;
+class UDroneSignalComponent;
 
 
 UENUM(BlueprintType)
@@ -68,7 +77,6 @@ struct FMotorState
     float ElectricalPowerWatt = 0.f;
     float MechanicalPowerWatt = 0.f;
     float ReactionTorqueNm = 0.f;
-
 };
 
 USTRUCT()
@@ -99,33 +107,108 @@ struct FFPVDebugState
     float YawInput = 0.f;
 };
 
-UCLASS()
-class AFPVDronePawn : public ADiplomaPawn
+UCLASS(Config = Game)
+class DIPLOMA_API AFPVDronePawn : public APawn
 {
     GENERATED_BODY()
 
 public:
     AFPVDronePawn();
 
-    virtual void Tick(float DeltaSeconds) override;
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaSeconds) override;
+    virtual void NotifyHit(UPrimitiveComponent* MyComp, AActor* Other, UPrimitiveComponent* OtherComp, bool bSelfMoved, FVector HitLocation, FVector HitNormal, FVector NormalImpulse, const FHitResult& Hit) override;
 
-    //BatteryTelemetry
-    float GetBatteryLoadedVoltage() const { return BatteryLoadedVoltage; }
-    float GetBatteryConsumedAh() const { return BatteryConsumedAh; }
-    float GetBatteryTotalCurrentA() const { return BatteryTotalCurrentA; }
+    FORCEINLINE UCameraComponent* GetCamera() const { return Camera; }
+    FORCEINLINE UStaticMeshComponent* GetPlaneMesh() const { return PlaneMesh; }
+
+    float GetRollInput() const { return RollInput; }
+    float GetPitchInput() const { return PitchInput; }
+    float GetYawInput() const { return YawInput; }
+
+    float GetReceivedThrottle() const;
+    float GetReceivedPitchInput() const;
+    float GetReceivedRollInput() const;
+    float GetReceivedYawInput() const;
+    float GetControlInputScale() const;
+    bool IsControlFailsafeActive() const;
+
+    const FDroneTelemetry& GetTelemetry() const { return Telemetry; }
+
+    bool IsArmed() const { return bArmedState; }
+    bool IsBombArmed() const { return bBombArmedState; }
+    bool IsKillCamActive() const { return bKillCamActive; }
+    bool IsCrashed() const { return bCrashed; }
+
+    float GetBatteryLoadedVoltage() const;
+    float GetBatteryConsumedAh() const;
+    float GetBatteryTotalCurrentA() const;
+
+    void UpdateTelemetry();
 
 protected:
-    virtual void ApplyThrust() override;
-    virtual void ApplyTorques() override;
-    virtual void UpdateTelemetry() override;
-    virtual void ResetDroneStateAfterRespawn() override;
-    virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
-    virtual void HandleCrashExplosion(const FHitResult& Hit) override;
+    virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
 private:
+    UPROPERTY(Category = Mesh, VisibleDefaultsOnly, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+    UStaticMeshComponent* PlaneMesh = nullptr;
 
-    //
+    UPROPERTY(Category = Camera, VisibleDefaultsOnly, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+    UCameraComponent* Camera = nullptr;
+
+    UPROPERTY(Category = Camera, VisibleDefaultsOnly, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+    UCameraComponent* KillCamCamera = nullptr;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FPV|Battery", meta = (AllowPrivateAccess = "true"))
+    UFPVBatteryComponent* BatteryComponent = nullptr;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UAV|Signal", meta = (AllowPrivateAccess = "true"))
+    UDroneSignalComponent* SignalComponent = nullptr;
+
+    UPROPERTY(BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+    FDroneTelemetry Telemetry;
+
+    UPROPERTY()
+    UMaterialInstanceDynamic* FPVPostProcessMID = nullptr;
+
+    bool bArmedState = false;
+    bool bBombArmedState = false;
+
+    float TelemetryStartTimeSeconds = 0.f;
+    float Throttle = 0.f;
+    float PitchInput = 0.f;
+    float RollInput = 0.f;
+    float YawInput = 0.f;
+    float BaroZeroZ = 0.f;
+    float LastDeltaSeconds = 0.f;
+
+    bool bCrashed = false;
+    FVector SpawnLocation;
+    FRotator SpawnRotation;
+    float LastSpawnWorldTime = 0.f;
+
+    UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+    float KillCamDuration = 3.f;
+
+    UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+    UParticleSystem* ExplosionEffect = nullptr;
+
+    UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+    float CrashSpawnGraceSeconds = 1.0f;
+
+    UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+    float CrashMinImpactSpeedMps = 8.0f;
+
+    UPROPERTY(EditAnywhere, Category = "UAV|Crash")
+    float CrashMinNormalImpulse = 25000.0f;
+
+    bool bKillCamActive = false;
+    float KillCamTimer = 0.f;
+    FVector CrashLocation;
+    FVector KillCamLocation;
+    bool bKillCamExplosionPending = false;
+    bool bKillCamExplosionSpawned = false;
+
     UPROPERTY(EditAnywhere, Category = "FPV|Debug")
     bool bLogFlightModeDebug = true;
 
@@ -133,7 +216,6 @@ private:
     float FlightModeDebugInterval = 0.10f;
 
     float FlightModeDebugTimer = 0.f;
-    //
 
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
     float AirDensity = 1.225f;
@@ -165,13 +247,12 @@ private:
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
     float RotorVerticalCd = 1.2f;
 
-    // Мотори: FL, FR, BL, BR
     UPROPERTY(EditAnywhere, Category = "FPV|Motors")
     TArray<FMotorState> Motors;
 
-    // Відстань від центру до мотора по X і Y (половина wheelbase)
     UPROPERTY(EditAnywhere, Category = "FPV|Motors")
     float ArmX = 0.f;
+
     UPROPERTY(EditAnywhere, Category = "FPV|Motors")
     float ArmY = 0.f;
 
@@ -184,7 +265,6 @@ private:
     UPROPERTY(EditAnywhere, Category = "FPV|Rates")
     float MaxYawRate = 0.f;
 
-    // PID контролери
     UPROPERTY(EditAnywhere, Category = "FPV|PID")
     FPIDController PitchPID;
 
@@ -194,17 +274,14 @@ private:
     UPROPERTY(EditAnywhere, Category = "FPV|PID")
     FPIDController YawPID;
 
-
     UPROPERTY(EditAnywhere, Category = "FPV|ForwardFlight")
     float PropwashSpeedScaleMps = 22.f;
 
     UPROPERTY(EditAnywhere, Category = "FPV|ForwardFlight")
     float MinPropEfficiency = 0.68f;
 
-
     UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
     float MotorThrustScale = 0.90f;
-
 
     UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
     float MotorKV = 900.f;
@@ -220,108 +297,6 @@ private:
 
     UPROPERTY(EditAnywhere, Category = "FPV|MotorModel")
     float MinOmegaRad = 30.f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    int32 BatterySeriesCells = 6;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    int32 BatteryParallelCells = 3;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryCellCapacityAh = 5.0f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryCellInternalResistanceOhm = 0.012f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryCellVoltageFull = 4.2f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryCellVoltageNominal = 3.6f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryCellVoltageEmpty = 3.0f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryUsableFraction = 0.85f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryBenchReferenceVoltage = 25.2f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryPackMassKg = 1.28f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryConsumedAh = 0.f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatterySoC = 1.f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryOpenCircuitVoltage = 25.2f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryLoadedVoltage = 25.2f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryTotalCurrentA = 0.f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryCellVoltageWarn = 3.30f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryCellVoltageCritical = 3.10f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryCellVoltageCutoff = 2.95f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryResistanceScale = 1.f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    float BatteryOutputScale = 1.f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    bool bBatteryLowVoltageWarn = false;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    bool bBatteryCriticalVoltage = false;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Battery")
-    bool bBatteryCutoffActive = false;
-
-    /*UPROPERTY(EditAnywhere, Category = "FPV|Telemetry")
-    float VideoLinkPercentValue = 100.f;*/
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Telemetry")
-    float TxPowerWValue = 2.5f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Payload")
-    bool bBombArmed = false;
-
-    /*float EvaluateMotorCurrentAmp(float Command) const;
-    float EvaluateMotorThrustGramsFromCurrent(float CurrentAmp) const;
-    float EvaluateMotorPowerWattFromCurrent(float CurrentAmp) const;*/
-    void UpdateMotorDynamics(float DeltaTime);
-    float ComputePropEfficiencyFactor(const FVector& LocalVelocityMps) const;
-
-
-    void InitMotors();
-    void UpdateMotorThrusts(float DeltaTime);
-    void ApplyMotorForces();
-    void ApplyAerodynamicDrag();
-
-    //Battery
-    float GetBatteryCapacityAh() const;
-    float GetBatteryUsableCapacityAh() const;
-    float GetBatteryInternalResistanceOhm() const;
-    float EvaluateCellOCVFromSoC(float SoC) const;
-    void ResetBatteryState();
-    void UpdateBatteryState(float TotalCurrentA, float DeltaTime);
-    float EvaluateBatteryResistanceScaleFromSoC(float SoC) const;
-    float EvaluateBatteryOutputScaleFromCellVoltage(float CellLoadedVoltage) const;
-
-    //FlightModes
 
     UPROPERTY(EditAnywhere, Category = "FPV|FlightMode")
     EFPVFlightMode FlightMode = EFPVFlightMode::Acro;
@@ -365,14 +340,47 @@ private:
     UPROPERTY(EditAnywhere, Category = "FPV|Explosion")
     float ExplosionDamageFalloff = 1.0f;
 
-    void ApplyExplosionDamage(FVector ExplosionLocation);
+    FFPVDebugState DebugState;
+    float DebugLogTimer = 0.f;
 
+    UFUNCTION()
+    void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);
+
+    void ToggleArm();
+    void ToggleBombArm();
+    void ThrottleInput(float Value);
+    void PitchInputAxis(float Value);
+    void RollInputAxis(float Value);
+    void YawInputAxis(float Value);
+
+    float NormalizeThrottle(float Raw) const;
+    float NormalizeCenteredAxis(float Raw) const;
+
+    void UpdateBaseTelemetry();
+    float GetRadioAltitudeMeters(bool& bValid) const;
+
+    void UpdateSignalTelemetry(float DeltaTime);
+
+    bool ShouldIgnoreCrashHit(const FVector& NormalImpulse) const;
+    void HandleCrashExplosion(const FHitResult& Hit);
+    void HandleCrash(const FVector& HitLocation);
+    void SpawnCrashExplosion(const FVector& HitLocation);
+    void StartKillCam(const FVector& HitLocation);
+    void EndKillCam();
+    void UpdateKillCamReplay(float DeltaSeconds);
+    void ResetDroneStateAfterRespawn();
+
+    void ApplyThrust();
+    void InitMotors();
+    void UpdateMotorThrusts(float DeltaTime);
+    void UpdateMotorDynamics(float DeltaTime);
+    float ComputePropEfficiencyFactor(const FVector& LocalVelocityMps) const;
+    void ApplyMotorForces();
+    void ApplyAerodynamicDrag();
+
+    void ApplyExplosionDamage(FVector ExplosionLocation);
     void CycleFlightMode();
     FString GetFlightModeText() const;
     float ComputeAngleRateNorm(float TargetAngleDeg, float CurrentAngleDeg, float MaxRateDeg) const;
     float ApplyAcroTrainerLimit(float TargetRateNorm, float CurrentAngleDeg, float LimitDeg, float MaxRateDeg) const;
-
-    //debug
-    FFPVDebugState DebugState;
-    float DebugLogTimer = 0.f;
 };

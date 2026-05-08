@@ -12,6 +12,12 @@
 void UFPVHUDWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 {
 	//SetVisibility(InTelemetry.bKillCamActive ? ESlateVisibility::Hidden : ESlateVisibility::Visible);
+	if (Text_Speed)
+	{
+		Text_Speed->SetText(FText::FromString(
+			FString::Printf(TEXT("%.0f KM/H"), InTelemetry.SpeedKmh)
+		));
+	}
 
 	if (Image_PitchArrow)
 	{
@@ -96,7 +102,7 @@ void UFPVHUDWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 		if (InTelemetry.bTxPowerValid)
 		{
 			Text_TxPower->SetText(FText::FromString(
-				FString::Printf(TEXT("%.0f W"), InTelemetry.TxPowerW)
+				FString::Printf(TEXT("%.1f W"), InTelemetry.TxPowerW)
 			));
 		}
 		else
