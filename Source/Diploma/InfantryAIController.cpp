@@ -442,6 +442,13 @@ void AInfantryAIController::ClearThreatState()
     ResetCombatFire();
     ResetFireRelocation();
     ResetFireStateTiming();
+
+    AInfantryCharacter* Infantry = Cast<AInfantryCharacter>(GetPawn());
+
+    if (Infantry)
+    {
+        Infantry->SetAIAnimState(TEXT("NoThreat"));
+    }
 }
 
 AActor* AInfantryAIController::FindBestThreatActor() const
@@ -1083,6 +1090,13 @@ void AInfantryAIController::ApplyMovementForState(FName AIState, AActor* ThreatA
 
     CurrentAIState = AIState;
     LastMovementDecisionTime = CurrentTime;
+
+    AInfantryCharacter* Infantry = Cast<AInfantryCharacter>(GetPawn());
+
+    if (Infantry)
+    {
+        Infantry->SetAIAnimState(AIState);
+    }
 
     FVector NewTargetLocation = FVector::ZeroVector;
     bool bHasMoveTarget = false;

@@ -12,6 +12,28 @@ class DIPLOMA_API AInfantryCharacter : public ACharacter
 public:
     AInfantryCharacter();
 
+    UFUNCTION(BlueprintCallable)
+    void SetAIAnimState(FName NewAIState);
+
+    UFUNCTION(BlueprintCallable)
+    void SetAnimCrouching(bool bNewCrouching);
+
+    UFUNCTION(BlueprintCallable)
+    void TriggerFireAnimation();
+
+    UFUNCTION(BlueprintCallable)
+    bool GetAnimSprinting() const;
+
+    UFUNCTION(BlueprintCallable)
+    bool GetAnimCrouching() const;
+
+    UFUNCTION(BlueprintCallable)
+    bool GetAnimFiring() const;
+
+    UFUNCTION(BlueprintCallable)
+    FName GetAnimAIState() const;
+
+
     virtual float TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser) override;
 
     UFUNCTION(BlueprintCallable)
@@ -44,6 +66,22 @@ public:
 
 
 protected:
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Infantry|Animation")
+    float FireAnimHoldSeconds = 0.22f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Infantry|Animation")
+    bool bAnimSprinting = false;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Infantry|Animation")
+    bool bAnimCrouching = false;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Infantry|Animation")
+    bool bAnimFiring = false;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Infantry|Animation")
+    FName AnimAIState = TEXT("NoThreat");
+
     virtual void BeginPlay() override;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Infantry")
@@ -102,6 +140,10 @@ protected:
     float BulletSpeedCmPerSecond = 90000.0f;
 
 private:
+
+    FTimerHandle FireAnimTimerHandle;
+
+    void ClearFireAnimation();
 
     void FireAtActorWithSpreadInternal(AActor* TargetActor, float SpreadDegrees, bool bIgnoreCooldown);
     void FireAtLocationWithSpreadInternal(FVector TargetLocation, float SpreadDegrees, bool bIgnoreCooldown);

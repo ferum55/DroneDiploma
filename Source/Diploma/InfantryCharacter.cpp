@@ -26,6 +26,7 @@ AInfantryCharacter::AInfantryCharacter()
     GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
     GetCharacterMovement()->MaxAcceleration = 800.0f;
     GetCharacterMovement()->BrakingDecelerationWalking = 1000.0f;
+    GetCharacterMovement()->NavAgentProps.bCanCrouch = true;
 }
 
 void AInfantryCharacter::BeginPlay()
@@ -203,6 +204,8 @@ void AInfantryCharacter::FireAtLocationWithSpreadInternal(FVector TargetLocation
         *MuzzleLocation.ToString(),
         *AimDirection.ToString(),
         SpreadDegrees);
+
+    TriggerFireAnimation();
 }
 
 void AInfantryCharacter::Die(FVector ExplosionOrigin, bool bApplyExplosionImpulse)
@@ -385,4 +388,90 @@ float AInfantryCharacter::GetSecondsBetweenShots() const
     }
 
     return 60.0f / FireRateRoundsPerMinute;
+}
+
+void AInfantryCharacter::SetAIAnimState(FName NewAIState)
+{
+    AnimAIState = NewAIState;
+
+    const bool bShouldCrouch =
+        NewAIState == TEXT("PrepareFire") ||
+        NewAIState == TEXT("CrouchFire");
+
+    const bool bShouldSprint =
+        NewAIState == TEXT("Disperse") ||
+        NewAIState == TEXT("BackOff") ||
+        NewAIState == TEXT("ReturnToPost");
+
+    SetAnimCrouching(bShouldCrouch);
+    bAnimSprinting = bShouldSprint;
+
+    if (NewAIState != TEXT("EvadeSideFire"))
+    {
+        if (bAnimCrouching)
+        {
+            bAnimFiring = false;
+        }
+    }
+}
+
+void AInfantryCharacter::SetAnimCrouching(bool bNewCrouching)
+{
+    bAnimCrouching = bNewCrouching;
+
+    if (bAnimCrouching)
+    {
+        Crouch();
+    }
+    else
+    {
+        UnCrouch();
+    }
+}
+
+void AInfantryCharacter::TriggerFireAnimation()
+{
+    if (bDead || bAnimCrouching)
+    {
+        return;
+    }
+
+    bAnimFiring = true;
+
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().ClearTimer(FireAnimTimerHandle);
+        GetWorld()->GetTimerManager().SetTimer(
+            FireAnimTimerHandle,
+            this,
+            &AInfantryCharacter::ClearFireAnimation,
+            FireAnimHoldSeconds,
+            false
+        );
+    }
+}
+
+void AInfantryCharacter::ClearFireAnimation()
+{
+    bAnimFiring = false;
+}
+
+bool AInfantryCharacter::GetAnimSprinting() const
+{
+    return bAnimSprinting;
+}
+
+bool AInfantryCharacter::GetAnimCrouching() const
+{
+    return bAnimCrouching;
+}
+
+bool AInfantryCharacter::GetAnimFiring() const
+{
+    return bAnimFiring;
+}
+
+FName AInfantryCharacter::GetAnimAIState() const
+{
+    return AnimAIState;
 }
