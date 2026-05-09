@@ -27,7 +27,21 @@ public:
     void FireAtLocation(FVector TargetLocation);
 
     UFUNCTION(BlueprintCallable)
+    void FireAtActorWithSpread(AActor* TargetActor, float SpreadDegrees);
+
+    UFUNCTION(BlueprintCallable)
+    void FireAtLocationWithSpread(FVector TargetLocation, float SpreadDegrees);
+
+    UFUNCTION(BlueprintCallable)
     AActor* GetInitialMoveTarget() const;
+
+    UFUNCTION(BlueprintCallable)
+    bool StartFireBurst(AActor* TargetActor);
+
+    UFUNCTION(BlueprintCallable)
+    bool StartFireBurstWithSpread(AActor* TargetActor, float SpreadDegrees);
+
+
 
 protected:
     virtual void BeginPlay() override;
@@ -74,7 +88,26 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Infantry|Ragdoll")
     float RagdollImpulseStrength = 850.0f;
 
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Infantry|Weapon")
+    int32 BurstShotCount = 3;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Infantry|Weapon")
+    float FireRateRoundsPerMinute = 600.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Infantry|Weapon")
+    float BurstCooldown = 0.8f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Infantry|Weapon")
+    float BulletSpeedCmPerSecond = 90000.0f;
+
 private:
+
+    void FireAtActorWithSpreadInternal(AActor* TargetActor, float SpreadDegrees, bool bIgnoreCooldown);
+    void FireAtLocationWithSpreadInternal(FVector TargetLocation, float SpreadDegrees, bool bIgnoreCooldown);
+
+    float ActiveBurstSpreadDegrees = 0.0f;
+
     float LastFireTime = -1000.0f;
 
     void Die(FVector ExplosionOrigin, bool bApplyExplosionImpulse);
@@ -82,5 +115,17 @@ private:
     FVector GetMuzzleLocation() const;
 
     FRotator GetAimRotation(FVector TargetLocation) const;
+
+    FTimerHandle BurstFireTimerHandle;
+
+    TWeakObjectPtr<AActor> BurstTargetActor;
+
+    int32 BurstShotsRemaining = 0;
+
+    float LastBurstStartTime = -10000.0f;
+
+    void FireBurstShot();
+
+    float GetSecondsBetweenShots() const;
 
 };
