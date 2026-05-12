@@ -247,6 +247,11 @@ void AFPVDronePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
     PlayerInputComponent->BindAction("Arm", IE_Pressed, this, &AFPVDronePawn::ToggleArm);
     PlayerInputComponent->BindAction("BombArm", IE_Pressed, this, &AFPVDronePawn::ToggleBombArm);
     PlayerInputComponent->BindAction("CycleFlightMode", IE_Pressed, this, &AFPVDronePawn::CycleFlightMode);
+
+        PlayerInputComponent->BindAxis("ArmSwitch", this, &AFPVDronePawn::ArmSwitchAxis);
+    PlayerInputComponent->BindAxis("BombArmSwitch", this, &AFPVDronePawn::BombArmSwitchAxis);
+    PlayerInputComponent->BindAxis("FlightModeSwitch", this, &AFPVDronePawn::FlightModeSwitchAxis);
+    PlayerInputComponent->BindAxis("AcroTrainerSwitch", this, &AFPVDronePawn::AcroTrainerSwitchAxis);
 }
 
 void AFPVDronePawn::Tick(float DeltaSeconds)
@@ -320,36 +325,12 @@ void AFPVDronePawn::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor,
 
 void AFPVDronePawn::ToggleArm()
 {
-    if (bCrashed || bKillCamActive)
-    {
-        return;
-    }
-
-    bArmedState = !bArmedState;
-
-    if (!bArmedState)
-    {
-        Throttle = 0.f;
-
-        if (SignalComponent)
-        {
-            SignalComponent->ResetSignalState();
-        }
-    }
-
-    UE_LOG(LogTemp, Warning, TEXT("Armed: %d"), bArmedState ? 1 : 0);
+    SetArmState(!bArmedState);
 }
 
 void AFPVDronePawn::ToggleBombArm()
 {
-    if (bCrashed || bKillCamActive)
-    {
-        return;
-    }
-
-    bBombArmedState = !bBombArmedState;
-
-    UE_LOG(LogTemp, Warning, TEXT("BombArmed: %d"), bBombArmedState ? 1 : 0);
+    SetBombArmState(!bBombArmedState);
 }
 
 void AFPVDronePawn::PitchInputAxis(float Value)
@@ -1160,4 +1141,181 @@ float AFPVDronePawn::GetControlInputScale() const
 bool AFPVDronePawn::IsControlFailsafeActive() const
 {
     return SignalComponent ? SignalComponent->IsControlFailsafeActive() : false;
+}
+
+void AFPVDronePawn::SetArmState(bool bNewState)
+{
+    if (bCrashed || bKillCamActive)
+    {
+        return;
+    }
+
+    if (bArmedState == bNewState)
+    {
+        return;
+    }
+
+    bArmedState = bNewState;
+
+    if (!bArmedState)
+    {
+        Throttle = 0.f;
+
+        if (SignalComponent)
+        {
+            SignalComponent->ResetSignalState();
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Armed: %d"), bArmedState ? 1 : 0);
+}
+
+void AFPVDronePawn::SetBombArmState(bool bNewState)
+{
+    if (bCrashed || bKillCamActive)
+    {
+        return;
+    }
+
+    if (bBombArmedState == bNewState)
+    {
+        return;
+    }
+
+    bBombArmedState = bNewState;
+
+    UE_LOG(LogTemp, Warning, TEXT("BombArmed: %d"), bBombArmedState ? 1 : 0);
+}
+
+
+bool AFPVDronePawn::ReadTwoPositionSwitch(float Value) const
+{
+    return Value > 0.5f;
+}
+
+int32 AFPVDronePawn::ReadThreePositionSwitch(float Value) const
+{
+    if (Value < 0.33f)
+    {
+        return 0;
+    }
+
+    if (Value < 0.66f)
+    {
+        return 1;
+    }
+
+    return 2;
+}
+
+void AFPVDronePawn::ArmSwitchAxis(float Value)
+{
+    const bool bSwitchOn = ReadTwoPositionSwitch(Value);
+
+    if (!bArmSwitchInitialized)
+    {
+        bArmSwitchInitialized = true;
+        bLastArmSwitchOn = bSwitchOn;
+        return;
+    }
+
+    if (bSwitchOn == bLastArmSwitchOn)
+    {
+        return;
+    }
+
+    bLastArmSwitchOn = bSwitchOn;
+    SetArmState(bSwitchOn);
+}
+
+void AFPVDronePawn::BombArmSwitchAxis(float Value)
+{
+    const bool bSwitchOn = ReadTwoPositionSwitch(Value);
+
+    if (!bBombSwitchInitialized)
+    {
+        bBombSwitchInitialized = true;
+        bLastBombSwitchOn = bSwitchOn;
+        return;
+    }
+
+    if (bSwitchOn == bLastBombSwitchOn)
+    {
+        return;
+    }
+
+    bLastBombSwitchOn = bSwitchOn;
+    SetBombArmState(bSwitchOn);
+}
+
+void AFPVDronePawn::FlightModeSwitchAxis(float Value)
+{
+    const int32 Position = ReadThreePositionSwitch(Value);
+    CurrentModeSwitchPosition = Position;
+
+    if (!bModeSwitchInitialized)
+    {
+        bModeSwitchInitialized = true;
+        LastModeSwitchPosition = Position;
+        return;
+    }
+
+    if (Position == LastModeSwitchPosition)
+    {
+        return;
+    }
+
+    LastModeSwitchPosition = Position;
+    ApplyFlightModeFromSwitches();
+}
+
+void AFPVDronePawn::AcroTrainerSwitchAxis(float Value)
+{
+    const bool bSwitchOn = ReadTwoPositionSwitch(Value);
+    bCurrentTrainerSwitchOn = bSwitchOn;
+
+    if (!bTrainerSwitchInitialized)
+    {
+        bTrainerSwitchInitialized = true;
+        bLastTrainerSwitchOn = bSwitchOn;
+        return;
+    }
+
+    if (bSwitchOn == bLastTrainerSwitchOn)
+    {
+        return;
+    }
+
+    bLastTrainerSwitchOn = bSwitchOn;
+    ApplyFlightModeFromSwitches();
+}
+
+void AFPVDronePawn::ApplyFlightModeFromSwitches()
+{
+    EFPVFlightMode NewMode = EFPVFlightMode::Acro;
+
+    if (CurrentModeSwitchPosition == 0)
+    {
+        NewMode = bCurrentTrainerSwitchOn
+            ? EFPVFlightMode::AcroTrainer
+            : EFPVFlightMode::Acro;
+    }
+    else if (CurrentModeSwitchPosition == 1)
+    {
+        NewMode = EFPVFlightMode::Angle;
+    }
+    else
+    {
+        NewMode = EFPVFlightMode::Horizon;
+    }
+
+    SetFlightModeDirect(NewMode);
+}
+
+void AFPVDronePawn::SetFlightModeDirect(EFPVFlightMode NewMode)
+{
+    if (FlightControllerComponent)
+    {
+        FlightControllerComponent->SetFlightMode(NewMode);
+    }
 }

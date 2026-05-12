@@ -43,6 +43,20 @@ void UFPVFlightControllerComponent::CycleFlightMode()
 	UE_LOG(LogTemp, Warning, TEXT("FlightMode: %s"), *GetFlightModeText());
 }
 
+void UFPVFlightControllerComponent::SetFlightMode(EFPVFlightMode NewMode)
+{
+	if (FlightMode == NewMode)
+	{
+		return;
+	}
+
+	FlightMode = NewMode;
+
+	ResetController();
+
+	UE_LOG(LogTemp, Warning, TEXT("FlightMode: %s"), *GetFlightModeText());
+}
+
 FString UFPVFlightControllerComponent::GetFlightModeText() const
 {
 	switch (FlightMode)

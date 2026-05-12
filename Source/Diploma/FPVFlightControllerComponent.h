@@ -33,11 +33,11 @@ public:
 
 	EFPVFlightMode GetFlightMode() const { return FlightMode; }
 	FString GetFlightModeText() const;
+	void SetFlightMode(EFPVFlightMode NewMode);
 
 	float GetMaxPitchRate() const { return MaxPitchRate; }
 	float GetMaxRollRate() const { return MaxRollRate; }
 	float GetMaxYawRate() const { return MaxYawRate; }
-	
 
 private:
 	UPROPERTY(EditAnywhere, Category = "FPV|Rates")

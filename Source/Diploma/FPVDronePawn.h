@@ -221,4 +221,33 @@ private:
     void ApplyExplosionDamage(FVector ExplosionLocation);
     void CycleFlightMode();
     FString GetFlightModeText() const;
+
+    //Switches
+    bool bArmSwitchInitialized = false;
+    bool bLastArmSwitchOn = false;
+
+    bool bBombSwitchInitialized = false;
+    bool bLastBombSwitchOn = false;
+
+    bool bModeSwitchInitialized = false;
+    int32 LastModeSwitchPosition = 0;
+    int32 CurrentModeSwitchPosition = 0;
+
+    bool bTrainerSwitchInitialized = false;
+    bool bLastTrainerSwitchOn = false;
+    bool bCurrentTrainerSwitchOn = false;
+
+    void SetArmState(bool bNewState);
+    void SetBombArmState(bool bNewState);
+
+    void ArmSwitchAxis(float Value);
+    void BombArmSwitchAxis(float Value);
+    void FlightModeSwitchAxis(float Value);
+    void AcroTrainerSwitchAxis(float Value);
+
+    bool ReadTwoPositionSwitch(float Value) const;
+    int32 ReadThreePositionSwitch(float Value) const;
+
+    void ApplyFlightModeFromSwitches();
+    void SetFlightModeDirect(EFPVFlightMode NewMode);
     };
