@@ -1,7 +1,6 @@
 #include "T72TankAIComponent.h"
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
 #include "Components/PrimitiveComponent.h"
 #include "TimerManager.h"
 
@@ -459,6 +458,10 @@ void UT72TankAIComponent::TickState(float DeltaTime)
 	case ET72TankAIState::Idle:
 		break;
 
+	case ET72TankAIState::EngineCoast:
+		TickEngineCoast(DeltaTime);
+		break;
+
 	case ET72TankAIState::MovingRoute:
 		TickMovementToActor(DeltaTime, GetCurrentRouteTarget());
 		break;
@@ -722,13 +725,7 @@ float UT72TankAIComponent::GetEffectiveTurretTurnSpeedDeg() const
 
 bool UT72TankAIComponent::TickFiring(float DeltaTime)
 {
-	if (bGunDestroyed || bTankDestroyed || bCrewEvacuated || CurrentState == ET72TankAIState::Destroyed || CurrentState == ET72TankAIState::Immobilized)
-	{
-		SetFiringActive(false);
-		return false;
-	}
-
-	if (bGunDestroyed || bTankDestroyed || CurrentState == ET72TankAIState::Destroyed || CurrentState == ET72TankAIState::Immobilized || CurrentState == ET72TankAIState::Burning)
+	if (bGunDestroyed || bTankDestroyed || bCrewEvacuated || CurrentState == ET72TankAIState::Destroyed || CurrentState == ET72TankAIState::Immobilized || CurrentState == ET72TankAIState::EngineCoast)
 	{
 		SetFiringActive(false);
 		return false;
@@ -848,9 +845,10 @@ void UT72TankAIComponent::BeginFirePositionPatrol()
 	FirePatrolTarget = FirePatrolCenter + FirePatrolAxis * FirePatrolDirection * (FirePatrolLengthCm * 0.5f);
 	bFirePatrolInitialized = true;
 	bFirePatrolFirstShotDone = false;
-	FireTimer = FireInterval;
+	
 
 	SetState(ET72TankAIState::FirePositionPatrol);
+	FireTimer = FireInterval;
 }
 
 void UT72TankAIComponent::SelectNextFirePosition()
@@ -1002,36 +1000,18 @@ void UT72TankAIComponent::FireWeapon()
 		return;
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("[T72 FIRE] FireWeapon called | Owner=%s ProjectileClass=%s Friendly=%s"),
-		*Owner->GetName(),
-		ProjectileClass ? *ProjectileClass->GetName() : TEXT("NULL"),
-		FriendlyPosition ? *FriendlyPosition->GetName() : TEXT("NULL"));
-
 	PlayMuzzleFlash();
 
-	if (!ProjectileClass)
-	{
-		UE_LOG(LogTemp, Error, TEXT("[T72 FIRE] ProjectileClass is NULL. Set BP_T72_Projectile in T72AI component"));
-		return;
-	}
 
 	USceneComponent* MuzzlePoint = FindMuzzlePoint();
 
 	const FVector SpawnLocation = MuzzlePoint ? MuzzlePoint->GetComponentLocation() : Owner->GetActorLocation() + Owner->GetActorForwardVector() * 500.0f;
 	FRotator SpawnRotation = MuzzlePoint ? MuzzlePoint->GetComponentRotation() : Owner->GetActorRotation();
 
-	UE_LOG(LogTemp, Warning, TEXT("[T72 FIRE] Muzzle=%s Location=%s Rotation=%s"),
-		MuzzlePoint ? *MuzzlePoint->GetName() : TEXT("NULL"),
-		*SpawnLocation.ToString(),
-		*SpawnRotation.ToString());
 
 	if (bAimProjectileAtFriendlyPosition && FriendlyPosition)
 	{
 		const FVector AimDirection = (FriendlyPosition->GetActorLocation() - SpawnLocation).GetSafeNormal();
-
-		UE_LOG(LogTemp, Warning, TEXT("[T72 FIRE] AimDirection=%s DistanceToFriendly=%.1f"),
-			*AimDirection.ToString(),
-			FVector::Dist(SpawnLocation, FriendlyPosition->GetActorLocation()));
 
 		if (!AimDirection.IsNearlyZero())
 		{
@@ -1045,10 +1025,6 @@ void UT72TankAIComponent::FireWeapon()
 			SpawnRotation = FinalDirection.Rotation();
 		}
 	}
-
-	DrawDebugSphere(GetWorld(), SpawnLocation, 40.0f, 16, FColor::Red, false, 5.0f);
-	DrawDebugLine(GetWorld(), SpawnLocation, SpawnLocation + SpawnRotation.Vector() * 3000.0f, FColor::Red, false, 5.0f, 0, 8.0f);
-
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.Owner = Owner;
 	SpawnParams.Instigator = Owner->GetInstigator();
@@ -1061,11 +1037,6 @@ void UT72TankAIComponent::FireWeapon()
 		UE_LOG(LogTemp, Error, TEXT("[T72 FIRE] SpawnActor failed"));
 		return;
 	}
-
-	UE_LOG(LogTemp, Warning, TEXT("[T72 FIRE] Projectile spawned: %s at %s rot %s"),
-		*Projectile->GetName(),
-		*Projectile->GetActorLocation().ToString(),
-		*Projectile->GetActorRotation().ToString());
 }
 
 USceneComponent* UT72TankAIComponent::FindMuzzlePoint() const
@@ -1166,6 +1137,13 @@ void UT72TankAIComponent::NotifyDroneImpactOrNearMiss(FVector ImpactLocation, bo
 
 void UT72TankAIComponent::DestroyTank()
 {
+	if (bTankDestroyed)
+	{
+		return;
+	}
+
+	ClearDamageTimers();
+
 	bTankDestroyed = true;
 	bMobilityDestroyed = true;
 	bGunDestroyed = true;
@@ -1346,6 +1324,9 @@ void UT72TankAIComponent::StartEngineBurning()
 
 	bEngineDestroyed = true;
 	bEngineMobilityFailureApplied = false;
+	bEngineFinalShotFired = false;
+
+	SetState(ET72TankAIState::EngineCoast);
 
 	if (GetWorld())
 	{
@@ -1356,11 +1337,36 @@ void UT72TankAIComponent::StartEngineBurning()
 
 		GetWorld()->GetTimerManager().SetTimer(EngineSecondaryExplosionTimerHandle, this, &UT72TankAIComponent::PlayEngineSecondaryExplosion, EngineSecondaryExplosionDelay, false);
 		GetWorld()->GetTimerManager().SetTimer(EngineMobilityFailureTimerHandle, this, &UT72TankAIComponent::ApplyEngineMobilityFailure, EngineMobilityFailureDelay, false);
-		GetWorld()->GetTimerManager().SetTimer(EngineHalfBurnTimerHandle, this, &UT72TankAIComponent::TriggerEngineHalfBurnEffects, FMath::Max(0.1f, EngineBurnoutTime * 0.5f), false);
 		GetWorld()->GetTimerManager().SetTimer(EngineBurnoutTimerHandle, this, &UT72TankAIComponent::FinishEngineBurnout, EngineBurnoutTime, false);
 	}
 
-	DebugLog(TEXT("[T72 DAMAGE] Engine hit, delayed failure sequence started"));
+	DebugLog(TEXT("[T72 DAMAGE] Engine hit, coast sequence started"));
+}
+
+void UT72TankAIComponent::TickEngineCoast(float DeltaTime)
+{
+	AActor* Owner = GetOwner();
+
+	if (!Owner || bTankDestroyed)
+	{
+		SetWheelSpeed(0.0f);
+		return;
+	}
+
+	TickAiming(DeltaTime);
+
+	const FVector CurrentLocation = Owner->GetActorLocation();
+	const FVector NewLocation = CurrentLocation + Owner->GetActorForwardVector() * MoveSpeedCm * EngineCoastSpeedScale * DeltaTime;
+
+	Owner->SetActorLocation(NewLocation, true);
+	SetWheelSpeed(MoveSpeedCm * EngineCoastSpeedScale * WheelAnimationSpeedScale);
+
+	if (!bEngineFinalShotFired && !bGunDestroyed && !bCrewEvacuated && IsAimedAtFriendly())
+	{
+		bEngineFinalShotFired = true;
+		FireWeapon();
+		DebugLog(TEXT("[T72 DAMAGE] Final shot after engine hit"));
+	}
 }
 
 void UT72TankAIComponent::ApplyEngineMobilityFailure()
@@ -1372,19 +1378,16 @@ void UT72TankAIComponent::ApplyEngineMobilityFailure()
 
 	bEngineMobilityFailureApplied = true;
 	bMobilityDestroyed = true;
+	bCrewEvacuated = true;
 
 	SetWheelSpeed(0.0f);
+	SetFiringActive(false);
+	OpenHatches();
+	StartHatchSmoke();
+	TriggerCrewEvacuation();
+	SetState(ET72TankAIState::Burning);
 
-	if (!bGunDestroyed && !bCrewEvacuated)
-	{
-		SetState(ET72TankAIState::Burning);
-	}
-	else
-	{
-		SetState(ET72TankAIState::Immobilized);
-	}
-
-	DebugLog(TEXT("[T72 DAMAGE] Engine mobility failed, turret speed reduced"));
+	DebugLog(TEXT("[T72 DAMAGE] Engine mobility failed, turret speed reduced, crew evacuation started"));
 }
 
 void UT72TankAIComponent::FinishEngineBurnout()
@@ -1764,3 +1767,19 @@ void UT72TankAIComponent::StartHatchKillFire()
 
 	DebugLog(TEXT("[T72 FX] Hatch kill fire attached"));
 }
+
+void UT72TankAIComponent::ClearDamageTimers()
+{
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	GetWorld()->GetTimerManager().ClearTimer(EngineBurnoutTimerHandle);
+	GetWorld()->GetTimerManager().ClearTimer(EngineMobilityFailureTimerHandle);
+	GetWorld()->GetTimerManager().ClearTimer(EngineSecondaryExplosionTimerHandle);
+	GetWorld()->GetTimerManager().ClearTimer(EngineHalfBurnTimerHandle);
+	GetWorld()->GetTimerManager().ClearTimer(TrackTurnReactionTimerHandle);
+	GetWorld()->GetTimerManager().ClearTimer(TrackCrewEvacTimerHandle);
+}
+

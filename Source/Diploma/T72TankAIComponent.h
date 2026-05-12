@@ -30,6 +30,7 @@ enum class ET72TankAIState : uint8
 	TrackFinalShot,
 	TrackCrewEvacWait,
 	Immobilized,
+	EngineCoast,
 	Burning,
 	Destroyed
 };
@@ -56,6 +57,7 @@ class DIPLOMA_API UT72TankAIComponent : public UActorComponent
 
 public:
 	UT72TankAIComponent();
+
 
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -166,12 +168,6 @@ public:
 	float MinDirectHitSpeedCm = 600.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Damage")
-	float MinWarheadVelocityForwardDot = 0.45f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Damage")
-	float MinWarheadFacingZoneDot = 0.35f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Damage")
 	float EngineBurnoutTime = 180.0f;
 
 	UPROPERTY(BlueprintReadOnly, Category = "T72 Damage")
@@ -194,6 +190,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Engine Damage")
 	float EngineMobilityFailureDelay = 5.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Engine Damage")
+	float EngineCoastSpeedScale = 0.35f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Engine Damage")
 	float DamagedTurretTurnSpeedDeg = 5.0f;
@@ -268,6 +267,13 @@ public:
 	TArray<int32> DestroyedMaterialElementIndices;
 
 private:
+
+
+	void ClearDamageTimers();
+
+	bool bEngineFinalShotFired = false;
+
+	void TickEngineCoast(float DeltaTime);
 
 	float MovementDebugTimer = 0.0f;
 
