@@ -27,6 +27,9 @@ AInfantryCharacter::AInfantryCharacter()
     GetCharacterMovement()->MaxAcceleration = 800.0f;
     GetCharacterMovement()->BrakingDecelerationWalking = 1000.0f;
     GetCharacterMovement()->NavAgentProps.bCanCrouch = true;
+    GetCharacterMovement()->bUseRVOAvoidance = true;
+    GetCharacterMovement()->AvoidanceConsiderationRadius = 300.0f;
+    GetCharacterMovement()->AvoidanceWeight = 0.7f;
 }
 
 void AInfantryCharacter::BeginPlay()

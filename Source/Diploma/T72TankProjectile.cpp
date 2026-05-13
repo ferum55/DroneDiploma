@@ -3,7 +3,8 @@
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
-#include "DrawDebugHelpers.h"
+#include "ManualRadialDamage.h"
+
 
 AT72TankProjectile::AT72TankProjectile()
 {
@@ -46,28 +47,47 @@ void AT72TankProjectile::BeginPlay()
 		ProjectileMovement->MaxSpeed,
 		ProjectileMovement->ProjectileGravityScale,
 		static_cast<int32>(Collision->GetCollisionEnabled()));
-
-	DrawDebugSphere(GetWorld(), GetActorLocation(), 30.0f, 12, FColor::Green, false, 5.0f);
 }
 
 void AT72TankProjectile::OnProjectileHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
-	UE_LOG(LogTemp, Warning, TEXT("[T72 PROJECTILE] Hit | Projectile=%s OtherActor=%s OtherComp=%s ImpactPoint=%s Location=%s Normal=%s"),
-		*GetName(),
-		OtherActor ? *OtherActor->GetName() : TEXT("NULL"),
-		OtherComp ? *OtherComp->GetName() : TEXT("NULL"),
-		*Hit.ImpactPoint.ToString(),
-		*Hit.Location.ToString(),
-		*Hit.ImpactNormal.ToString());
-
 	if (OtherActor == GetOwner())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[T72 PROJECTILE] Ignored hit with owner"));
 		return;
 	}
 
-	DrawDebugSphere(GetWorld(), Hit.ImpactPoint, DamageRadiusCm, 24, FColor::Orange, false, 5.0f);
-	Explode(Hit.ImpactPoint);
+	const FVector ExplosionLocation = Hit.ImpactPoint.IsNearlyZero()
+		? GetActorLocation()
+		: Hit.ImpactPoint;
+
+	AController* DamageInstigator = GetInstigatorController();
+
+	if (!DamageInstigator && GetOwner())
+	{
+		DamageInstigator = GetOwner()->GetInstigatorController();
+	}
+
+	FManualRadialDamage::Apply(
+		GetWorld(),
+		ExplosionLocation + FVector(0.0f, 0.0f, ManualExplosionOriginZOffset),
+		this,
+		DamageInstigator,
+		ManualExplosionMaxDamage,
+		ManualExplosionMinDamage,
+		ManualExplosionInnerRadiusCm,
+		ManualExplosionOuterRadiusCm,
+		ManualExplosionFalloff
+	);
+
+	UE_LOG(LogTemp, Warning, TEXT("[T72 PROJECTILE] Hit | Projectile=%s OtherActor=%s OtherComp=%s ImpactPoint=%s DamageOrigin=%s"),
+		*GetName(),
+		*GetNameSafe(OtherActor),
+		*GetNameSafe(OtherComp),
+		*ExplosionLocation.ToString(),
+		*(ExplosionLocation + FVector(0.0f, 0.0f, ManualExplosionOriginZOffset)).ToString());
+
+	Explode(ExplosionLocation);
 }
 
 void AT72TankProjectile::Explode(const FVector& Location)
@@ -80,22 +100,6 @@ void AT72TankProjectile::Explode(const FVector& Location)
 
 	bExploded = true;
 
-
-
-	TSubclassOf<UDamageType> ActualDamageType = DamageTypeClass ? DamageTypeClass : UDamageType::StaticClass();
-
-	UGameplayStatics::ApplyRadialDamage(
-		this,
-		Damage,
-		Location,
-		DamageRadiusCm,
-		ActualDamageType,
-		TArray<AActor*>(),
-		this,
-		GetInstigatorController(),
-		true
-	);
-
 	if (ExplosionEffect)
 	{
 		UGameplayStatics::SpawnEmitterAtLocation(
@@ -106,11 +110,12 @@ void AT72TankProjectile::Explode(const FVector& Location)
 			FVector(ExplosionEffectScale),
 			true
 		);
+
 		UE_LOG(LogTemp, Warning, TEXT("[T72 PROJECTILE] Explosion particle spawned"));
 	}
 	else
 	{
-		UE_LOG(LogTemp, Error, TEXT("[T72 PROJECTILE] ExplosionEffect is NULL. Set it in BP_T72_Projectile"));
+		UE_LOG(LogTemp, Error, TEXT("[T72 PROJECTILE] ExplosionEffect is NULL. Set it in BP_T72TankProjectile"));
 	}
 
 	Destroy();

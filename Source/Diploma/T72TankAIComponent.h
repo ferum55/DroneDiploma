@@ -13,6 +13,9 @@ class UParticleSystemComponent;
 class USceneComponent;
 class UMaterialInterface;
 class USkeletalMeshComponent;
+class AInfantryCharacter;
+class UPrimitiveComponent;
+class AFPVDronePawn;
 
 
 UENUM(BlueprintType)
@@ -58,6 +61,11 @@ class DIPLOMA_API UT72TankAIComponent : public UActorComponent
 public:
 	UT72TankAIComponent();
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
+	FName TankNavObstacleComponentName = TEXT("TankNavObstacle");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
+	float CrewSpawnDelayAfterNavObstacleSeconds = 0.35f;
 
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -165,7 +173,9 @@ public:
 	FName DroneWarheadComponentTag = TEXT("FPV_WarheadProbe");
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Damage")
-	float MinDirectHitSpeedCm = 600.0f;
+	float MinDirectHitSpeedCm = 100.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Damage")
+	float MinDroneZoneCrashSpeedCm = 100.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Damage")
 	float EngineBurnoutTime = 180.0f;
@@ -187,6 +197,13 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "T72 Damage")
 	void NotifyDroneExplosion(FVector ImpactLocation, float ExplosionRadiusCm);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Damage")
+	bool bRequireDroneWarheadArmed = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Damage")
+	bool bCrashDroneOnVulnerableZoneContact = true;
+
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Engine Damage")
 	float EngineMobilityFailureDelay = 5.0f;
@@ -266,8 +283,103 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Destroyed Visual")
 	TArray<int32> DestroyedMaterialElementIndices;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Ground")
+	bool bFollowGround = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Ground")
+	bool bAlignToGround = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Ground")
+	bool bUseFourPointGroundTrace = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Ground")
+	float GroundTraceUpCm = 500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Ground")
+	float GroundTraceDownCm = 2000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Ground")
+	float GroundOffsetCm = 10.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Ground")
+	float GroundTraceHalfLengthCm = 260.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Ground")
+	float GroundTraceHalfWidthCm = 150.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Ground")
+	float MaxDriveableSlopeDeg = 20.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Ground")
+	float GroundRotationInterpSpeedDeg = 45.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Ground")
+	bool bUseManualGroundTracePoints = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Ground")
+	FName GroundTraceFLName = TEXT("GroundTrace_FL");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Ground")
+	FName GroundTraceFRName = TEXT("GroundTrace_FR");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Ground")
+	FName GroundTraceRLName = TEXT("GroundTrace_RL");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Ground")
+	FName GroundTraceRRName = TEXT("GroundTrace_RR");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
+	TSubclassOf<AInfantryCharacter> CrewInfantryClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
+	AActor* CrewShelterPoint = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
+	int32 CrewCount = 3;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
+	TArray<FName> CrewSpawnPointNames;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
+	float CrewSpawnFallbackSpacingCm = 90.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
+	float CrewSpawnZOffsetCm = 40.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "T72 Crew")
+	TArray<AInfantryCharacter*> SpawnedCrew;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
+	float CrewSpawnSideOffsetCm = 300.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
+	float CrewSpawnFrontOffsetCm = 300.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
+	float CrewShelterFormationRadiusCm = 250.0f;
+
 private:
 
+
+
+	FTimerHandle CrewSpawnDelayTimerHandle;
+
+	UPrimitiveComponent* FindTankNavObstacleComponent() const;
+	void SetTankNavObstacleActive(bool bActive);
+	void SpawnCrewFromTankDelayed();
+
+	FVector GetCrewShelterLocation(int32 CrewIndex) const;
+	bool bCrewSpawned = false;
+
+	void SpawnCrewFromTank();
+	FVector GetCrewSpawnLocation(int32 CrewIndex) const;
+
+	bool GetManualGroundTraceOffsets(FVector& OutFL, FVector& OutFR, FVector& OutRL, FVector& OutRR) const;
+	FVector TransformGroundTraceOffset(const FVector& DesiredLocation, float DesiredYaw, const FVector& LocalOffset) const;
+	bool ProjectLocationToGround(const FVector& DesiredLocation, float DesiredYaw, FVector& OutLocation, FVector& OutGroundNormal, float& OutSlopeDeg) const;
+	bool TraceGroundPoint(const FVector& WorldPoint, FVector& OutHitLocation, FVector& OutHitNormal) const;
+	FRotator MakeGroundAlignedRotation(float DesiredYaw, const FVector& GroundNormal) const;
+	bool IsSlopeDriveable(float SlopeDeg) const;
 
 	void ClearDamageTimers();
 
@@ -332,6 +444,8 @@ private:
 	bool IsDroneActor(AActor* Actor) const;
 	bool IsDroneWarheadComponent(UPrimitiveComponent* Component) const;
 	bool IsValidDirectWarheadHit(UPrimitiveComponent* ZoneComponent, AActor* DroneActor, UPrimitiveComponent* DroneHitComponent, FVector& OutHitLocation) const;
+	bool IsDroneWarheadArmed(AActor* DroneActor) const;
+	void CrashDroneOnVulnerableZoneContact(AActor* DroneActor, UPrimitiveComponent* ZoneComponent, UPrimitiveComponent* DroneHitComponent);
 
 	void DestroyTank();
 	void ImmobilizeTank();

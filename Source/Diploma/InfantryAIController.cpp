@@ -49,6 +49,11 @@ void AInfantryAIController::OnMoveCompleted(FAIRequestID RequestID, const FPathF
         RequestID.GetID(),
         static_cast<int32>(Result.Code),
         static_cast<int32>(Result.Flags));
+
+    if (bHasMissionObjective)
+    {
+        ApplyMissionObjectiveMovement();
+    }
 }
 
 void AInfantryAIController::TryInitializeAI()
@@ -195,6 +200,11 @@ void AInfantryAIController::TryInitializeAI()
     }
 
     UE_LOG(LogInfantryAI, Warning, TEXT("[INF AI] AI initialization success"));
+
+    if (bHasMissionObjective)
+    {
+        ApplyMissionObjectiveMovement();
+    }
 }
 
 void AInfantryAIController::StartThreatUpdates()
@@ -254,6 +264,11 @@ void AInfantryAIController::UpdateThreatState()
 
     if (!ThreatActor)
     {
+        if (bHasMissionObjective)
+        {
+            ApplyMissionObjectiveMovement();
+            return;
+        }
         if (ShouldReturnToPost())
         {
             BB->SetValueAsBool(ShouldFireKey, false);
@@ -280,6 +295,12 @@ void AInfantryAIController::UpdateThreatState()
 
     if (ThreatDrone && (ThreatDrone->IsCrashed() || ThreatDrone->IsKillCamActive()))
     {
+        if (bHasMissionObjective)
+        {
+            ApplyMissionObjectiveMovement();
+            return;
+        }
+
         ClearThreatState();
         return;
     }
@@ -294,6 +315,12 @@ void AInfantryAIController::UpdateThreatState()
 
     if (!bDetected)
     {
+        if (bHasMissionObjective)
+        {
+            ApplyMissionObjectiveMovement();
+            return;
+        }
+
         if (ShouldReturnToPost())
         {
             SetThreatActor(nullptr);
@@ -404,6 +431,22 @@ void AInfantryAIController::UpdateThreatState()
             bFinalShouldFire ? 1 : 0,
             *AIState.ToString());
     }
+}
+
+void AInfantryAIController::BeginMissionObjectiveMoveToLocation(FVector ObjectiveLocation, bool bRunToObjective)
+{
+    bHasMissionObjective = true;
+    bMissionObjectiveRun = bRunToObjective;
+    bWaitingAtMissionObjective = false;
+    MissionObjectiveActor = nullptr;
+    MissionObjectiveLocation = ObjectiveLocation;
+
+    ApplyMissionObjectiveMovement();
+
+    UE_LOG(LogInfantryAI, Warning, TEXT("[INF OBJECTIVE] Assigned location | Pawn=%s Location=%s Run=%d"),
+        *GetNameSafe(GetPawn()),
+        *MissionObjectiveLocation.ToString(),
+        bRunToObjective ? 1 : 0);
 }
 
 void AInfantryAIController::ClearThreatState()
@@ -1894,4 +1937,150 @@ void AInfantryAIController::LogNavigationToTarget(const FVector& TargetLocation)
         Path->IsPartial() ? 1 : 0,
         Path->PathPoints.Num(),
         PathLength);
+}
+
+void AInfantryAIController::BeginMissionObjectiveMoveTo(AActor* ObjectivePoint, bool bRunToObjective)
+{
+    if (!ObjectivePoint)
+    {
+        UE_LOG(LogInfantryAI, Warning, TEXT("[INF OBJECTIVE] ObjectivePoint is null | Pawn=%s"), *GetNameSafe(GetPawn()));
+        return;
+    }
+
+    bHasMissionObjective = true;
+    bMissionObjectiveRun = bRunToObjective;
+    bWaitingAtMissionObjective = false;
+    MissionObjectiveActor = ObjectivePoint;
+    MissionObjectiveLocation = ObjectivePoint->GetActorLocation();
+
+    ApplyMissionObjectiveMovement();
+
+    UE_LOG(LogInfantryAI, Warning, TEXT("[INF OBJECTIVE] Assigned | Pawn=%s Objective=%s Location=%s Run=%d"),
+        *GetNameSafe(GetPawn()),
+        *GetNameSafe(ObjectivePoint),
+        *MissionObjectiveLocation.ToString(),
+        bRunToObjective ? 1 : 0);
+}
+
+void AInfantryAIController::ClearMissionObjective()
+{
+    bHasMissionObjective = false;
+    bMissionObjectiveRun = false;
+    bWaitingAtMissionObjective = false;
+    MissionObjectiveActor = nullptr;
+    MissionObjectiveLocation = FVector::ZeroVector;
+
+    UE_LOG(LogInfantryAI, Warning, TEXT("[INF OBJECTIVE] Cleared | Pawn=%s"), *GetNameSafe(GetPawn()));
+}
+
+bool AInfantryAIController::IsWaitingAtMissionObjective() const
+{
+    return bHasMissionObjective && bWaitingAtMissionObjective;
+}
+
+bool AInfantryAIController::HasReachedMissionObjective() const
+{
+    APawn* ControlledPawn = GetPawn();
+
+    if (!ControlledPawn)
+    {
+        return false;
+    }
+
+    return FVector::Dist2D(ControlledPawn->GetActorLocation(), MissionObjectiveLocation) <= MissionObjectiveAcceptanceRadiusCm;
+}
+
+void AInfantryAIController::ApplyMissionObjectiveMovement()
+{
+    APawn* ControlledPawn = GetPawn();
+
+    if (!ControlledPawn || !bHasMissionObjective)
+    {
+        return;
+    }
+
+    AInfantryCharacter* Infantry = Cast<AInfantryCharacter>(ControlledPawn);
+
+    if (!Infantry || Infantry->IsDead())
+    {
+        return;
+    }
+
+    UBlackboardComponent* BB = GetBlackboardComponent();
+
+    if (!BB)
+    {
+        return;
+    }
+
+    AActor* ObjectiveActor = MissionObjectiveActor.Get();
+
+    if (ObjectiveActor)
+    {
+        MissionObjectiveLocation = ObjectiveActor->GetActorLocation();
+    }
+
+    FVector ProjectedObjectiveLocation = MissionObjectiveLocation;
+
+    if (TryProjectPointToNavMesh(MissionObjectiveLocation, ProjectedObjectiveLocation))
+    {
+        MissionObjectiveLocation = ProjectedObjectiveLocation;
+    }
+
+    SetThreatActor(nullptr);
+
+    if (HasReachedMissionObjective())
+    {
+        bWaitingAtMissionObjective = true;
+        bHasActiveCombatMove = false;
+
+        StopMovement();
+
+        FVector CurrentLocation = ControlledPawn->GetActorLocation();
+
+        if (TryProjectPointToNavMesh(CurrentLocation, CurrentLocation))
+        {
+            SetTargetLocation(CurrentLocation);
+        }
+        else
+        {
+            SetTargetLocation(ControlledPawn->GetActorLocation());
+        }
+
+        BB->SetValueAsBool(ShouldFireKey, false);
+        BB->SetValueAsBool(ShouldRunKey, false);
+        BB->SetValueAsBool(InCoverKey, true);
+        BB->SetValueAsBool(FireRelocatingKey, false);
+        BB->SetValueAsName(AIStateKey, MissionObjectiveWaitState);
+
+        SetShouldRun(false);
+        SetInCover(true);
+        Infantry->SetAIAnimState(MissionObjectiveWaitState);
+
+        UE_LOG(LogInfantryAI, Warning, TEXT("[INF OBJECTIVE] Waiting | Pawn=%s Location=%s"),
+            *GetNameSafe(ControlledPawn),
+            *ControlledPawn->GetActorLocation().ToString());
+
+        return;
+    }
+
+    bWaitingAtMissionObjective = false;
+    bHasActiveCombatMove = true;
+    LastIssuedMoveTarget = MissionObjectiveLocation;
+
+    BB->SetValueAsBool(ShouldFireKey, false);
+    BB->SetValueAsBool(ShouldRunKey, bMissionObjectiveRun);
+    BB->SetValueAsBool(InCoverKey, false);
+    BB->SetValueAsBool(FireRelocatingKey, false);
+    BB->SetValueAsName(AIStateKey, MissionObjectiveMoveState);
+
+    SetShouldRun(bMissionObjectiveRun);
+    SetInCover(false);
+    Infantry->SetAIAnimState(MissionObjectiveMoveState);
+
+    SetTargetLocation(MissionObjectiveLocation);
+
+    UE_LOG(LogInfantryAI, Warning, TEXT("[INF OBJECTIVE] Moving | Pawn=%s Target=%s"),
+        *GetNameSafe(ControlledPawn),
+        *MissionObjectiveLocation.ToString());
 }

@@ -3,6 +3,7 @@
 #include "FPVBatteryComponent.h"
 #include "FPVMotorComponent.h"
 #include "FPVFlightControllerComponent.h"
+#include "ManualRadialDamage.h"
 
 #include "UObject/ConstructorHelpers.h"
 #include "Camera/CameraComponent.h"
@@ -495,6 +496,25 @@ void AFPVDronePawn::HandleCrash(const FVector& HitLocation)
         bKillCamExplosionPending ? 1 : 0);
 
     StartKillCam(HitLocation);
+}
+
+void AFPVDronePawn::ForceCrashAtLocation(const FVector& HitLocation)
+{
+    if (bCrashed)
+    {
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("[DRONE FORCE CRASH] Location=%s Bomb=%d"),
+        *HitLocation.ToString(),
+        bBombArmedState ? 1 : 0);
+
+    if (bBombArmedState)
+    {
+        ApplyExplosionDamage(HitLocation);
+    }
+
+    HandleCrash(HitLocation);
 }
 
 void AFPVDronePawn::SpawnCrashExplosion(const FVector& HitLocation)
@@ -990,32 +1010,31 @@ void AFPVDronePawn::ApplyExplosionDamage(FVector ExplosionLocation)
         return;
     }
 
-    TArray<AActor*> IgnoredActors;
-    IgnoredActors.Add(this);
+    const FVector DamageOrigin = ExplosionLocation + FVector(0.0f, 0.0f, ExplosionDamageOriginZOffset);
 
-    UGameplayStatics::ApplyRadialDamageWithFalloff(
-        this,
-        ExplosionDamage,
-        ExplosionMinimumDamage,
-        ExplosionLocation,
-        ExplosionInnerRadius,
-        ExplosionOuterRadius,
-        ExplosionDamageFalloff,
-        UDamageType::StaticClass(),
-        IgnoredActors,
-        this,
-        GetController(),
-        ECC_Visibility
-    );
-
+    if (bUseManualExplosionDamage)
+    {
+        FManualRadialDamage::Apply(
+            GetWorld(),
+            DamageOrigin,
+            this,
+            GetController(),
+            ManualExplosionMaxDamage,
+            ManualExplosionMinDamage,
+            ManualExplosionInnerRadiusCm,
+            ManualExplosionOuterRadiusCm,
+            ManualExplosionFalloff
+        );
+    }
     UE_LOG(LogTemp, Warning,
-        TEXT("[FPV EXPLOSION] Damage applied | Location=%s Damage=%.1f Min=%.1f Inner=%.1f Outer=%.1f"),
+        TEXT("[FPV EXPLOSION] Damage applied | Location=%s DamageOrigin=%s Manual=%d Max=%.1f Min=%.1f Inner=%.1f Outer=%.1f"),
         *ExplosionLocation.ToString(),
-        ExplosionDamage,
-        ExplosionMinimumDamage,
-        ExplosionInnerRadius,
-        ExplosionOuterRadius
-    );
+        *DamageOrigin.ToString(),
+        bUseManualExplosionDamage ? 1 : 0,
+        ManualExplosionMaxDamage,
+        ManualExplosionMinDamage,
+        ManualExplosionInnerRadiusCm,
+        ManualExplosionOuterRadiusCm);
 }
 
 void AFPVDronePawn::UpdateTelemetry()

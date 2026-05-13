@@ -28,14 +28,26 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
 	UProjectileMovementComponent* ProjectileMovement;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-	float Damage = 10.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Projectile|Damage")
+	bool bUseManualExplosionDamage = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-	float DamageRadiusCm = 1500.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Projectile|Damage")
+	float ManualExplosionMaxDamage = 80.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-	TSubclassOf<UDamageType> DamageTypeClass;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Projectile|Damage")
+	float ManualExplosionMinDamage = 20.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Projectile|Damage")
+	float ManualExplosionInnerRadiusCm = 150.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Projectile|Damage")
+	float ManualExplosionOuterRadiusCm = 600.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Projectile|Damage")
+	float ManualExplosionFalloff = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Projectile|Damage")
+	float ManualExplosionOriginZOffset = 60.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FX")
 	UParticleSystem* ExplosionEffect = nullptr;

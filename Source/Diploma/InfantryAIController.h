@@ -23,7 +23,30 @@ public:
     UFUNCTION(BlueprintCallable)
     void SetThreatActor(AActor* ThreatActor);
 
+    UFUNCTION(BlueprintCallable)
+    void BeginMissionObjectiveMoveTo(AActor* ObjectivePoint, bool bRunToObjective = true);
+
+    UFUNCTION(BlueprintCallable)
+    void ClearMissionObjective();
+
+    UFUNCTION(BlueprintCallable)
+    bool IsWaitingAtMissionObjective() const;
+
+    UFUNCTION(BlueprintCallable)
+    void BeginMissionObjectiveMoveToLocation(FVector ObjectiveLocation, bool bRunToObjective = true);
+
+
 protected:
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Mission Objective")
+    float MissionObjectiveAcceptanceRadiusCm = 250.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Mission Objective")
+    FName MissionObjectiveMoveState = TEXT("ReturnToPost");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Mission Objective")
+    FName MissionObjectiveWaitState = TEXT("NoThreat");
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI")
     UBehaviorTree* BehaviorTreeAsset;
 
@@ -189,7 +212,19 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Facing")
     float CombatFacingInterpSpeed = 14.0f;
 
+   
 private:
+
+    bool bHasMissionObjective = false;
+    bool bMissionObjectiveRun = true;
+    bool bWaitingAtMissionObjective = false;
+
+    TWeakObjectPtr<AActor> MissionObjectiveActor;
+    FVector MissionObjectiveLocation = FVector::ZeroVector;
+
+    void ApplyMissionObjectiveMovement();
+    bool HasReachedMissionObjective() const;
+
     FTimerHandle NavInitTimerHandle;
     FTimerHandle ThreatUpdateTimerHandle;
 

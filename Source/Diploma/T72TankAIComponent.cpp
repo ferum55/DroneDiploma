@@ -3,6 +3,8 @@
 #include "Engine/World.h"
 #include "Components/PrimitiveComponent.h"
 #include "TimerManager.h"
+#include "InfantryCharacter.h"
+#include "InfantryAIController.h"
 
 #include "Kismet/GameplayStatics.h"
 #include "Particles/ParticleSystem.h"
@@ -11,6 +13,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
+#include "FPVDronePawn.h"
 
 UT72TankAIComponent::UT72TankAIComponent()
 {
@@ -59,6 +62,7 @@ UT72TankAIComponent::UT72TankAIComponent()
 	{
 		HatchKillFireFX = HatchFireFinder.Object;
 	}
+
 }
 
 
@@ -73,6 +77,10 @@ void UT72TankAIComponent::BeginPlay()
 	bEngineDestroyed = false;
 	bEngineMobilityFailureApplied = false;
 	bCrewEvacuated = false;
+	bCrewSpawned = false;
+	SpawnedCrew.Empty();
+
+	SetTankNavObstacleActive(false);
 
 	RegisterDamageZones();
 	ApplyDefaultAssetReferences();
@@ -83,6 +91,8 @@ void UT72TankAIComponent::BeginPlay()
 	{
 		StartMission();
 	}
+	bCrewSpawned = false;
+	SpawnedCrew.Empty();
 }
 
 void UT72TankAIComponent::ApplyDefaultAssetReferences()
@@ -250,6 +260,11 @@ bool UT72TankAIComponent::IsValidDirectWarheadHit(UPrimitiveComponent* ZoneCompo
 	{
 		return false;
 	}
+	if (bRequireDroneWarheadArmed && !IsDroneWarheadArmed(DroneActor))
+	{
+		DebugLog(TEXT("[T72 DAMAGE] Direct hit rejected: drone warhead is not armed"));
+		return false;
+	}
 
 	if (!IsDroneWarheadComponent(DroneHitComponent))
 	{
@@ -293,6 +308,66 @@ bool UT72TankAIComponent::IsValidDirectWarheadHit(UPrimitiveComponent* ZoneCompo
 
 	return true;
 }
+bool UT72TankAIComponent::IsDroneWarheadArmed(AActor* DroneActor) const
+{
+	const AFPVDronePawn* FPVDrone = Cast<AFPVDronePawn>(DroneActor);
+
+	if (!FPVDrone)
+	{
+		return false;
+	}
+
+	return FPVDrone->IsBombArmed();
+}
+
+void UT72TankAIComponent::CrashDroneOnVulnerableZoneContact(AActor* DroneActor, UPrimitiveComponent* ZoneComponent, UPrimitiveComponent* DroneHitComponent)
+{
+	if (!bCrashDroneOnVulnerableZoneContact)
+	{
+		return;
+	}
+
+	AFPVDronePawn* FPVDrone = Cast<AFPVDronePawn>(DroneActor);
+
+	if (!FPVDrone || FPVDrone->IsCrashed())
+	{
+		return;
+	}
+
+	if (!IsDroneWarheadComponent(DroneHitComponent))
+	{
+		return;
+	}
+
+	const float DroneSpeedCm = FPVDrone->GetVelocity().Size();
+
+	if (DroneSpeedCm < MinDroneZoneCrashSpeedCm)
+	{
+		return;
+	}
+
+	FVector CrashLocation = DroneHitComponent
+		? DroneHitComponent->GetComponentLocation()
+		: FPVDrone->GetActorLocation();
+
+	if (ZoneComponent)
+	{
+		FVector ClosestPoint = CrashLocation;
+		const float ClosestDistance = ZoneComponent->GetClosestPointOnCollision(CrashLocation, ClosestPoint);
+
+		if (ClosestDistance >= 0.0f)
+		{
+			CrashLocation = ClosestPoint;
+		}
+	}
+
+	FPVDrone->ForceCrashAtLocation(CrashLocation);
+
+	DebugLog(FString::Printf(TEXT("[T72 DAMAGE] Drone force-crashed after vulnerable zone contact | Drone=%s Bomb=%d Location=%s"),
+		*GetNameSafe(FPVDrone),
+		FPVDrone->IsBombArmed() ? 1 : 0,
+		*CrashLocation.ToString()));
+}
 
 void UT72TankAIComponent::OnDamageZoneBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
@@ -308,18 +383,26 @@ void UT72TankAIComponent::OnDamageZoneBeginOverlap(UPrimitiveComponent* Overlapp
 		return;
 	}
 
-	FVector HitLocation = OverlappedComponent->GetComponentLocation();
+	const bool bWarheadContact = IsDroneWarheadComponent(OtherComp);
 
-	if (!IsValidDirectWarheadHit(OverlappedComponent, OtherActor, OtherComp, HitLocation))
+	FVector HitLocation = OverlappedComponent->GetComponentLocation();
+	const bool bValidDirectHit = IsValidDirectWarheadHit(OverlappedComponent, OtherActor, OtherComp, HitLocation);
+
+	if (bValidDirectHit)
+	{
+		DebugLog(FString::Printf(TEXT("[T72 DAMAGE] Valid direct warhead hit: %s Location=%s"), *UEnum::GetValueAsString(Zone), *HitLocation.ToString()));
+		ApplyZoneDamage(Zone, HitLocation);
+	}
+	else
 	{
 		DebugLog(FString::Printf(TEXT("[T72 DAMAGE] Vulnerable zone touched but rejected: %s OtherComp=%s"), *UEnum::GetValueAsString(Zone), OtherComp ? *OtherComp->GetName() : TEXT("NULL")));
-		return;
 	}
 
-	DebugLog(FString::Printf(TEXT("[T72 DAMAGE] Valid direct warhead hit: %s Location=%s"), *UEnum::GetValueAsString(Zone), *HitLocation.ToString()));
-	ApplyZoneDamage(Zone, HitLocation);
+	if (bWarheadContact)
+	{
+		CrashDroneOnVulnerableZoneContact(OtherActor, OverlappedComponent, OtherComp);
+	}
 }
-
 void UT72TankAIComponent::ApplyZoneDamage(ET72DamageZone Zone, FVector HitLocation)
 {
 	if (bTankDestroyed || CurrentState == ET72TankAIState::Destroyed)
@@ -471,6 +554,12 @@ void UT72TankAIComponent::TickState(float DeltaTime)
 		break;
 
 	case ET72TankAIState::Aiming:
+		if (bGunDestroyed)
+		{
+			SetFiringActive(false);
+			break;
+		}
+
 		TickAiming(DeltaTime);
 		if (IsAimedAtFriendly())
 		{
@@ -479,6 +568,13 @@ void UT72TankAIComponent::TickState(float DeltaTime)
 		break;
 
 	case ET72TankAIState::Firing:
+		if (bGunDestroyed)
+		{
+			SetFiringActive(false);
+			SetState(ET72TankAIState::Aiming);
+			break;
+		}
+
 		TickAiming(DeltaTime);
 		TickFiring(DeltaTime);
 		break;
@@ -504,7 +600,10 @@ void UT72TankAIComponent::TickState(float DeltaTime)
 		break;
 
 	case ET72TankAIState::TrackCrewEvacWait:
-		TickAiming(DeltaTime);
+		if (!bGunDestroyed)
+		{
+			TickAiming(DeltaTime);
+		}
 		break;
 
 	case ET72TankAIState::Immobilized:
@@ -512,8 +611,11 @@ void UT72TankAIComponent::TickState(float DeltaTime)
 		break;
 
 	case ET72TankAIState::Burning:
-		TickAiming(DeltaTime);
-		TickFiring(DeltaTime);
+		if (!bGunDestroyed)
+		{
+			TickAiming(DeltaTime);
+			TickFiring(DeltaTime);
+		}
 		break;
 
 	case ET72TankAIState::Destroyed:
@@ -597,23 +699,54 @@ void UT72TankAIComponent::TickMovementToActor(float DeltaTime, AActor* TargetAct
 
 	const FVector Direction = ToTarget.GetSafeNormal();
 	const FRotator CurrentRotation = Owner->GetActorRotation();
-	const FRotator TargetRotation = Direction.Rotation();
-	const FRotator NewRotation = FMath::RInterpConstantTo(CurrentRotation, TargetRotation, DeltaTime, BodyTurnSpeedDeg);
+	const FRotator TargetYawRotation = Direction.Rotation();
 
-	Owner->SetActorRotation(FRotator(0.0f, NewRotation.Yaw, 0.0f));
-
-	const float YawError = FMath::Abs(FMath::FindDeltaAngleDegrees(CurrentRotation.Yaw, TargetRotation.Yaw));
+	const float YawError = FMath::Abs(FMath::FindDeltaAngleDegrees(CurrentRotation.Yaw, TargetYawRotation.Yaw));
 	const float MoveAlpha = YawError > 65.0f ? 0.35f : 1.0f;
-	const FVector NewLocation = CurrentLocation + Owner->GetActorForwardVector() * MoveSpeedCm * MoveAlpha * DeltaTime;
 
-	const bool bMoved = Owner->SetActorLocation(NewLocation, true);
+	const FRotator NewYawRotation = FMath::RInterpConstantTo(
+		FRotator(0.0f, CurrentRotation.Yaw, 0.0f),
+		FRotator(0.0f, TargetYawRotation.Yaw, 0.0f),
+		DeltaTime,
+		BodyTurnSpeedDeg
+	);
+
+	const FVector RawNewLocation = CurrentLocation + Owner->GetActorForwardVector() * MoveSpeedCm * MoveAlpha * DeltaTime;
+
+	FVector GroundedLocation = RawNewLocation;
+	FVector GroundNormal = FVector::UpVector;
+	float SlopeDeg = 0.0f;
+
+	if (!ProjectLocationToGround(RawNewLocation, NewYawRotation.Yaw, GroundedLocation, GroundNormal, SlopeDeg))
+	{
+		SetWheelSpeed(0.0f);
+		return;
+	}
+
+	if (!IsSlopeDriveable(SlopeDeg))
+	{
+		SetWheelSpeed(0.0f);
+		return;
+	}
+
+	FRotator FinalRotation = FRotator(0.0f, NewYawRotation.Yaw, 0.0f);
+
+	if (bAlignToGround)
+	{
+		FinalRotation = MakeGroundAlignedRotation(NewYawRotation.Yaw, GroundNormal);
+	}
+
+	FinalRotation = FMath::RInterpConstantTo(CurrentRotation, FinalRotation, DeltaTime, GroundRotationInterpSpeedDeg);
+
+	Owner->SetActorRotation(FinalRotation);
+	const bool bMoved = Owner->SetActorLocation(GroundedLocation, false);
 
 	if (!bMoved && MovementDebugTimer < 0.05f)
 	{
 		DebugLog(FString::Printf(
 			TEXT("[T72 MOVE] SetActorLocation blocked | Old=%s New=%s"),
 			*CurrentLocation.ToString(),
-			*NewLocation.ToString()
+			*GroundedLocation.ToString()
 		));
 	}
 
@@ -622,7 +755,7 @@ void UT72TankAIComponent::TickMovementToActor(float DeltaTime, AActor* TargetAct
 
 void UT72TankAIComponent::TickFirePositionPatrol(float DeltaTime)
 {
-	if (bTankDestroyed || bMobilityDestroyed || CurrentState == ET72TankAIState::Destroyed || CurrentState == ET72TankAIState::Immobilized || CurrentState == ET72TankAIState::Burning)
+	if (bTankDestroyed || bGunDestroyed || bMobilityDestroyed || CurrentState == ET72TankAIState::Destroyed || CurrentState == ET72TankAIState::Immobilized || CurrentState == ET72TankAIState::Burning) 
 	{
 		SetWheelSpeed(0.0f);
 		return;
@@ -679,21 +812,57 @@ void UT72TankAIComponent::TickFirePositionPatrol(float DeltaTime)
 	}
 
 	const FRotator CurrentRotation = Owner->GetActorRotation();
-	const FRotator TargetRotation = Direction.Rotation();
-	const FRotator NewRotation = FMath::RInterpConstantTo(CurrentRotation, TargetRotation, DeltaTime, BodyTurnSpeedDeg);
+	const FRotator TargetYawRotation = Direction.Rotation();
 
-	Owner->SetActorRotation(FRotator(0.0f, NewRotation.Yaw, 0.0f));
+	const FRotator NewYawRotation = FMath::RInterpConstantTo(
+		FRotator(0.0f, CurrentRotation.Yaw, 0.0f),
+		FRotator(0.0f, TargetYawRotation.Yaw, 0.0f),
+		DeltaTime,
+		BodyTurnSpeedDeg
+	);
 
-	const float YawError = FMath::Abs(FMath::FindDeltaAngleDegrees(CurrentRotation.Yaw, TargetRotation.Yaw));
+	const float YawError = FMath::Abs(FMath::FindDeltaAngleDegrees(CurrentRotation.Yaw, TargetYawRotation.Yaw));
 	const float MoveAlpha = YawError > 65.0f ? 0.25f : 1.0f;
-	const FVector NewLocation = CurrentLocation + Owner->GetActorForwardVector() * FirePatrolMoveSpeedCm * MoveAlpha * DeltaTime;
 
-	Owner->SetActorLocation(NewLocation, true);
+	const FVector RawNewLocation = CurrentLocation + Owner->GetActorForwardVector() * FirePatrolMoveSpeedCm * MoveAlpha * DeltaTime;
+
+	FVector GroundedLocation = RawNewLocation;
+	FVector GroundNormal = FVector::UpVector;
+	float SlopeDeg = 0.0f;
+
+	if (!ProjectLocationToGround(RawNewLocation, NewYawRotation.Yaw, GroundedLocation, GroundNormal, SlopeDeg))
+	{
+		SetWheelSpeed(0.0f);
+		return;
+	}
+
+	if (!IsSlopeDriveable(SlopeDeg))
+	{
+		SetWheelSpeed(0.0f);
+		return;
+	}
+
+	FRotator FinalRotation = FRotator(0.0f, NewYawRotation.Yaw, 0.0f);
+
+	if (bAlignToGround)
+	{
+		FinalRotation = MakeGroundAlignedRotation(NewYawRotation.Yaw, GroundNormal);
+	}
+
+	FinalRotation = FMath::RInterpConstantTo(CurrentRotation, FinalRotation, DeltaTime, GroundRotationInterpSpeedDeg);
+
+	Owner->SetActorRotation(FinalRotation);
+	Owner->SetActorLocation(GroundedLocation, false);
 	SetWheelSpeed(FirePatrolMoveSpeedCm * WheelAnimationSpeedScale * MoveAlpha);
 }
 
 void UT72TankAIComponent::TickAiming(float DeltaTime)
 {
+	if (bGunDestroyed || bTankDestroyed || bCrewEvacuated)
+	{
+		return;
+	}
+
 	AActor* Owner = GetOwner();
 
 	if (!Owner || !FriendlyPosition)
@@ -994,6 +1163,12 @@ void UT72TankAIComponent::FireWeapon()
 {
 	AActor* Owner = GetOwner();
 
+	if (bGunDestroyed || bTankDestroyed || bCrewEvacuated)
+	{
+		SetFiringActive(false);
+		DebugLog(TEXT("[T72 FIRE] FireWeapon rejected: gun destroyed, tank destroyed, or crew evacuated"));
+		return;
+	}
 	if (!Owner)
 	{
 		UE_LOG(LogTemp, Error, TEXT("[T72 FIRE] Owner is null"));
@@ -1202,7 +1377,10 @@ void UT72TankAIComponent::TickTrackTurnReaction(float DeltaTime)
 		return;
 	}
 
-	TickAiming(DeltaTime);
+	if (!bGunDestroyed)
+	{
+		TickAiming(DeltaTime);
+	}
 
 	if (!bTrackHitWhileMoving)
 	{
@@ -1210,13 +1388,41 @@ void UT72TankAIComponent::TickTrackTurnReaction(float DeltaTime)
 		return;
 	}
 
+
 	const float YawDelta = TrackTurnDirection * TrackTurnReactionSpeedDeg * DeltaTime;
-	Owner->AddActorWorldRotation(FRotator(0.0f, YawDelta, 0.0f));
+	const FRotator CurrentRotation = Owner->GetActorRotation();
+	const float NewYaw = CurrentRotation.Yaw + YawDelta;
 
 	const FVector CurrentLocation = Owner->GetActorLocation();
-	const FVector NewLocation = CurrentLocation + Owner->GetActorForwardVector() * MoveSpeedCm * TrackReactionForwardSpeedScale * DeltaTime;
+	const FVector RawNewLocation = CurrentLocation + Owner->GetActorForwardVector() * MoveSpeedCm * TrackReactionForwardSpeedScale * DeltaTime;
 
-	Owner->SetActorLocation(NewLocation, true);
+	FVector GroundedLocation = RawNewLocation;
+	FVector GroundNormal = FVector::UpVector;
+	float SlopeDeg = 0.0f;
+
+	if (!ProjectLocationToGround(RawNewLocation, NewYaw, GroundedLocation, GroundNormal, SlopeDeg))
+	{
+		SetWheelSpeed(0.0f);
+		return;
+	}
+
+	if (!IsSlopeDriveable(SlopeDeg))
+	{
+		SetWheelSpeed(0.0f);
+		return;
+	}
+
+	FRotator FinalRotation = FRotator(0.0f, NewYaw, 0.0f);
+
+	if (bAlignToGround)
+	{
+		FinalRotation = MakeGroundAlignedRotation(NewYaw, GroundNormal);
+	}
+
+	FinalRotation = FMath::RInterpConstantTo(CurrentRotation, FinalRotation, DeltaTime, GroundRotationInterpSpeedDeg);
+
+	Owner->SetActorRotation(FinalRotation);
+	Owner->SetActorLocation(GroundedLocation, false);
 	SetWheelSpeed(MoveSpeedCm * TrackReactionForwardSpeedScale * WheelAnimationSpeedScale);
 }
 
@@ -1230,6 +1436,14 @@ void UT72TankAIComponent::FinishTrackTurnReaction()
 	SetWheelSpeed(0.0f);
 	SetFiringActive(false);
 	FireTimer = FireInterval;
+
+	if (bGunDestroyed)
+	{
+		StartTrackCrewEvacTimer();
+		DebugLog(TEXT("[T72 DAMAGE] Track turn reaction finished, gun destroyed, final shot skipped"));
+		return;
+	}
+
 	SetState(ET72TankAIState::TrackFinalShot);
 
 	DebugLog(TEXT("[T72 DAMAGE] Track turn reaction finished, final shot allowed"));
@@ -1353,20 +1567,45 @@ void UT72TankAIComponent::TickEngineCoast(float DeltaTime)
 		return;
 	}
 
-	TickAiming(DeltaTime);
+	if (!bGunDestroyed)
+	{
+		TickAiming(DeltaTime);
+	}
+
+	const FRotator CurrentRotation = Owner->GetActorRotation();
+	const float CurrentYaw = CurrentRotation.Yaw;
 
 	const FVector CurrentLocation = Owner->GetActorLocation();
-	const FVector NewLocation = CurrentLocation + Owner->GetActorForwardVector() * MoveSpeedCm * EngineCoastSpeedScale * DeltaTime;
+	const FVector RawNewLocation = CurrentLocation + Owner->GetActorForwardVector() * MoveSpeedCm * EngineCoastSpeedScale * DeltaTime;
 
-	Owner->SetActorLocation(NewLocation, true);
-	SetWheelSpeed(MoveSpeedCm * EngineCoastSpeedScale * WheelAnimationSpeedScale);
+	FVector GroundedLocation = RawNewLocation;
+	FVector GroundNormal = FVector::UpVector;
+	float SlopeDeg = 0.0f;
 
-	if (!bEngineFinalShotFired && !bGunDestroyed && !bCrewEvacuated && IsAimedAtFriendly())
+	if (!ProjectLocationToGround(RawNewLocation, CurrentYaw, GroundedLocation, GroundNormal, SlopeDeg))
 	{
-		bEngineFinalShotFired = true;
-		FireWeapon();
-		DebugLog(TEXT("[T72 DAMAGE] Final shot after engine hit"));
+		SetWheelSpeed(0.0f);
+		return;
 	}
+
+	if (!IsSlopeDriveable(SlopeDeg))
+	{
+		SetWheelSpeed(0.0f);
+		return;
+	}
+
+	FRotator FinalRotation = CurrentRotation;
+
+	if (bAlignToGround)
+	{
+		FinalRotation = MakeGroundAlignedRotation(CurrentYaw, GroundNormal);
+	}
+
+	FinalRotation = FMath::RInterpConstantTo(CurrentRotation, FinalRotation, DeltaTime, GroundRotationInterpSpeedDeg);
+
+	Owner->SetActorRotation(FinalRotation);
+	Owner->SetActorLocation(GroundedLocation, false);
+	SetWheelSpeed(MoveSpeedCm * EngineCoastSpeedScale * WheelAnimationSpeedScale);
 }
 
 void UT72TankAIComponent::ApplyEngineMobilityFailure()
@@ -1384,9 +1623,8 @@ void UT72TankAIComponent::ApplyEngineMobilityFailure()
 	SetFiringActive(false);
 	OpenHatches();
 	StartHatchSmoke();
-	TriggerCrewEvacuation();
 	SetState(ET72TankAIState::Burning);
-
+	SpawnCrewFromTank();
 	DebugLog(TEXT("[T72 DAMAGE] Engine mobility failed, turret speed reduced, crew evacuation started"));
 }
 
@@ -1673,8 +1911,136 @@ void UT72TankAIComponent::FinalizeEngineBurnoutVisuals()
 
 void UT72TankAIComponent::TriggerCrewEvacuation()
 {
-	CallBlueprintEventNoParams(TEXT("SpawnCrewFromTank"));
+	SetTankNavObstacleActive(true);
+
+	if (GetWorld() && CrewSpawnDelayAfterNavObstacleSeconds > 0.0f)
+	{
+		GetWorld()->GetTimerManager().ClearTimer(CrewSpawnDelayTimerHandle);
+		GetWorld()->GetTimerManager().SetTimer(
+			CrewSpawnDelayTimerHandle,
+			this,
+			&UT72TankAIComponent::SpawnCrewFromTankDelayed,
+			CrewSpawnDelayAfterNavObstacleSeconds,
+			false
+		);
+	}
+	else
+	{
+		SpawnCrewFromTank();
+	}
+
 	DebugLog(TEXT("[T72 CREW] Crew evacuation requested"));
+}
+
+FVector UT72TankAIComponent::GetCrewSpawnLocation(int32 CrewIndex) const
+{
+	AActor* Owner = GetOwner();
+
+	if (!Owner)
+	{
+		return FVector::ZeroVector;
+	}
+
+	const FVector BaseLocation = Owner->GetActorLocation();
+	const FVector Forward = Owner->GetActorForwardVector();
+	const FVector Right = Owner->GetActorRightVector();
+	const FVector UpOffset(0.0f, 0.0f, CrewSpawnZOffsetCm);
+
+	if (CrewIndex == 0)
+	{
+		return BaseLocation + Right * CrewSpawnSideOffsetCm + UpOffset;
+	}
+
+	if (CrewIndex == 1)
+	{
+		return BaseLocation - Right * CrewSpawnSideOffsetCm + UpOffset;
+	}
+
+	if (CrewIndex == 2)
+	{
+		return BaseLocation + Forward * CrewSpawnFrontOffsetCm + UpOffset;
+	}
+
+	const float Offset = (CrewIndex - 2) * CrewSpawnFallbackSpacingCm;
+
+	return BaseLocation - Forward * CrewSpawnFrontOffsetCm + Right * Offset + UpOffset;
+}
+
+void UT72TankAIComponent::SpawnCrewFromTank()
+{
+	if (bCrewSpawned)
+	{
+		DebugLog(TEXT("[T72 CREW] Crew already spawned"));
+		return;
+	}
+
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	if (!CrewInfantryClass)
+	{
+		DebugLog(TEXT("[T72 CREW] CrewInfantryClass is NULL"));
+		return;
+	}
+
+	if (!CrewShelterPoint)
+	{
+		DebugLog(TEXT("[T72 CREW] CrewShelterPoint is NULL"));
+		return;
+	}
+
+	bCrewSpawned = true;
+	SpawnedCrew.Empty();
+
+	AActor* Owner = GetOwner();
+	const FRotator BaseRotation = Owner ? Owner->GetActorRotation() : FRotator::ZeroRotator;
+
+	for (int32 i = 0; i < CrewCount; i++)
+	{
+		const FVector SpawnLocation = GetCrewSpawnLocation(i);
+		const FRotator SpawnRotation(0.0f, BaseRotation.Yaw + FMath::RandRange(-35.0f, 35.0f), 0.0f);
+
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.Owner = Owner;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+		AInfantryCharacter* CrewMember = GetWorld()->SpawnActor<AInfantryCharacter>(
+			CrewInfantryClass,
+			SpawnLocation,
+			SpawnRotation,
+			SpawnParams
+		);
+
+		if (!CrewMember)
+		{
+			DebugLog(FString::Printf(TEXT("[T72 CREW] Failed to spawn crew member %d"), i));
+			continue;
+		}
+
+		CrewMember->SpawnDefaultController();
+		CrewMember->SetRunning(true);
+		CrewMember->SetAIAnimState(TEXT("ReturnToPost"));
+
+		SpawnedCrew.Add(CrewMember);
+
+		AInfantryAIController* CrewController = Cast<AInfantryAIController>(CrewMember->GetController());
+
+		if (CrewController)
+		{
+			CrewController->BeginMissionObjectiveMoveToLocation(GetCrewShelterLocation(i), true);
+		}
+		else
+		{
+			DebugLog(FString::Printf(TEXT("[T72 CREW] Crew member has no InfantryAIController | Pawn=%s"), *GetNameSafe(CrewMember)));
+		}
+
+		DebugLog(FString::Printf(TEXT("[T72 CREW] Spawned crew member %d | Pawn=%s Shelter=%s"),
+			i,
+			*GetNameSafe(CrewMember),
+			*GetNameSafe(CrewShelterPoint)));
+	}
 }
 
 USkeletalMeshComponent* UT72TankAIComponent::FindTankMesh() const
@@ -1781,5 +2147,302 @@ void UT72TankAIComponent::ClearDamageTimers()
 	GetWorld()->GetTimerManager().ClearTimer(EngineHalfBurnTimerHandle);
 	GetWorld()->GetTimerManager().ClearTimer(TrackTurnReactionTimerHandle);
 	GetWorld()->GetTimerManager().ClearTimer(TrackCrewEvacTimerHandle);
+	GetWorld()->GetTimerManager().ClearTimer(CrewSpawnDelayTimerHandle);
+}
+
+
+bool UT72TankAIComponent::TraceGroundPoint(const FVector& WorldPoint, FVector& OutHitLocation, FVector& OutHitNormal) const
+{
+	UWorld* World = GetWorld();
+	const AActor* Owner = GetOwner();
+
+	if (!World || !Owner)
+	{
+		return false;
+	}
+
+	const FVector Start = WorldPoint + FVector(0.0f, 0.0f, GroundTraceUpCm);
+	const FVector End = WorldPoint - FVector(0.0f, 0.0f, GroundTraceDownCm);
+
+	FCollisionQueryParams Params;
+	Params.AddIgnoredActor(Owner);
+
+	FHitResult Hit;
+
+	const bool bHit = World->LineTraceSingleByChannel(
+		Hit,
+		Start,
+		End,
+		ECC_Visibility,
+		Params
+	);
+
+	if (!bHit)
+	{
+		return false;
+	}
+
+	OutHitLocation = Hit.Location;
+	OutHitNormal = Hit.ImpactNormal.GetSafeNormal();
+
+	return true;
+}
+
+bool UT72TankAIComponent::ProjectLocationToGround(const FVector& DesiredLocation, float DesiredYaw, FVector& OutLocation, FVector& OutGroundNormal, float& OutSlopeDeg) const
+{
+	if (!bFollowGround)
+	{
+		OutLocation = DesiredLocation;
+		OutGroundNormal = FVector::UpVector;
+		OutSlopeDeg = 0.0f;
+		return true;
+	}
+
+	const FRotator YawRotation(0.0f, DesiredYaw, 0.0f);
+	const FVector Forward = YawRotation.Vector();
+	const FVector Right = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+	if (!bUseFourPointGroundTrace)
+	{
+		FVector HitLocation;
+		FVector HitNormal;
+
+		if (!TraceGroundPoint(DesiredLocation, HitLocation, HitNormal))
+		{
+			return false;
+		}
+
+		OutGroundNormal = HitNormal;
+		OutSlopeDeg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(OutGroundNormal, FVector::UpVector), -1.0f, 1.0f)));
+		OutLocation = FVector(DesiredLocation.X, DesiredLocation.Y, HitLocation.Z + GroundOffsetCm);
+
+		return true;
+	}
+
+	FVector FrontLeftPoint;
+	FVector FrontRightPoint;
+	FVector RearLeftPoint;
+	FVector RearRightPoint;
+
+	if (bUseManualGroundTracePoints)
+	{
+		FVector LocalFL;
+		FVector LocalFR;
+		FVector LocalRL;
+		FVector LocalRR;
+
+		if (!GetManualGroundTraceOffsets(LocalFL, LocalFR, LocalRL, LocalRR))
+		{
+			return false;
+		}
+
+		FrontLeftPoint = TransformGroundTraceOffset(DesiredLocation, DesiredYaw, LocalFL);
+		FrontRightPoint = TransformGroundTraceOffset(DesiredLocation, DesiredYaw, LocalFR);
+		RearLeftPoint = TransformGroundTraceOffset(DesiredLocation, DesiredYaw, LocalRL);
+		RearRightPoint = TransformGroundTraceOffset(DesiredLocation, DesiredYaw, LocalRR);
+	}
+	else
+	{
+		FrontLeftPoint = DesiredLocation + Forward * GroundTraceHalfLengthCm - Right * GroundTraceHalfWidthCm;
+		FrontRightPoint = DesiredLocation + Forward * GroundTraceHalfLengthCm + Right * GroundTraceHalfWidthCm;
+		RearLeftPoint = DesiredLocation - Forward * GroundTraceHalfLengthCm - Right * GroundTraceHalfWidthCm;
+		RearRightPoint = DesiredLocation - Forward * GroundTraceHalfLengthCm + Right * GroundTraceHalfWidthCm;
+	}
+	FVector FrontLeftHit;
+	FVector FrontRightHit;
+	FVector RearLeftHit;
+	FVector RearRightHit;
+
+	FVector FrontLeftNormal;
+	FVector FrontRightNormal;
+	FVector RearLeftNormal;
+	FVector RearRightNormal;
+
+	const bool bFL = TraceGroundPoint(FrontLeftPoint, FrontLeftHit, FrontLeftNormal);
+	const bool bFR = TraceGroundPoint(FrontRightPoint, FrontRightHit, FrontRightNormal);
+	const bool bRL = TraceGroundPoint(RearLeftPoint, RearLeftHit, RearLeftNormal);
+	const bool bRR = TraceGroundPoint(RearRightPoint, RearRightHit, RearRightNormal);
+
+	if (!bFL || !bFR || !bRL || !bRR)
+	{
+		return false;
+	}
+
+	const FVector FrontCenter = (FrontLeftHit + FrontRightHit) * 0.5f;
+	const FVector RearCenter = (RearLeftHit + RearRightHit) * 0.5f;
+	const FVector LeftCenter = (FrontLeftHit + RearLeftHit) * 0.5f;
+	const FVector RightCenter = (FrontRightHit + RearRightHit) * 0.5f;
+
+	const FVector GroundForward = (FrontCenter - RearCenter).GetSafeNormal();
+	const FVector GroundRight = (RightCenter - LeftCenter).GetSafeNormal();
+
+	FVector PlaneNormal = FVector::CrossProduct(GroundForward, GroundRight).GetSafeNormal();
+
+	if (PlaneNormal.Z < 0.0f)
+	{
+		PlaneNormal *= -1.0f;
+	}
+
+	if (PlaneNormal.IsNearlyZero())
+	{
+		PlaneNormal = (FrontLeftNormal + FrontRightNormal + RearLeftNormal + RearRightNormal).GetSafeNormal();
+	}
+
+	if (PlaneNormal.IsNearlyZero())
+	{
+		PlaneNormal = FVector::UpVector;
+	}
+
+	const float AverageZ = (FrontLeftHit.Z + FrontRightHit.Z + RearLeftHit.Z + RearRightHit.Z) * 0.25f;
+
+	OutGroundNormal = PlaneNormal;
+	OutSlopeDeg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(OutGroundNormal, FVector::UpVector), -1.0f, 1.0f)));
+	OutLocation = FVector(DesiredLocation.X, DesiredLocation.Y, AverageZ + GroundOffsetCm);
+
+	return true;
+}
+
+FRotator UT72TankAIComponent::MakeGroundAlignedRotation(float DesiredYaw, const FVector& GroundNormal) const
+{
+	const FVector DesiredForward = FRotator(0.0f, DesiredYaw, 0.0f).Vector();
+	FVector ProjectedForward = FVector::VectorPlaneProject(DesiredForward, GroundNormal).GetSafeNormal();
+
+	if (ProjectedForward.IsNearlyZero())
+	{
+		ProjectedForward = DesiredForward;
+	}
+
+	return FRotationMatrix::MakeFromXZ(ProjectedForward, GroundNormal).Rotator();
+}
+
+bool UT72TankAIComponent::IsSlopeDriveable(float SlopeDeg) const
+{
+	return SlopeDeg <= MaxDriveableSlopeDeg;
+}
+
+bool UT72TankAIComponent::GetManualGroundTraceOffsets(FVector& OutFL, FVector& OutFR, FVector& OutRL, FVector& OutRR) const
+{
+	AActor* Owner = GetOwner();
+
+	if (!Owner)
+	{
+		return false;
+	}
+
+	USceneComponent* FL = FindSceneComponentByName(GroundTraceFLName);
+	USceneComponent* FR = FindSceneComponentByName(GroundTraceFRName);
+	USceneComponent* RL = FindSceneComponentByName(GroundTraceRLName);
+	USceneComponent* RR = FindSceneComponentByName(GroundTraceRRName);
+
+	if (!FL || !FR || !RL || !RR)
+	{
+		DebugLog(TEXT("[T72 GROUND] Manual ground trace point missing"));
+		return false;
+	}
+
+	const FTransform OwnerTransform = Owner->GetActorTransform();
+
+	OutFL = OwnerTransform.InverseTransformPosition(FL->GetComponentLocation());
+	OutFR = OwnerTransform.InverseTransformPosition(FR->GetComponentLocation());
+	OutRL = OwnerTransform.InverseTransformPosition(RL->GetComponentLocation());
+	OutRR = OwnerTransform.InverseTransformPosition(RR->GetComponentLocation());
+
+	OutFL.Z = 0.0f;
+	OutFR.Z = 0.0f;
+	OutRL.Z = 0.0f;
+	OutRR.Z = 0.0f;
+
+	return true;
+}
+
+FVector UT72TankAIComponent::TransformGroundTraceOffset(const FVector& DesiredLocation, float DesiredYaw, const FVector& LocalOffset) const
+{
+	const FRotator YawRotation(0.0f, DesiredYaw, 0.0f);
+	return DesiredLocation + YawRotation.RotateVector(LocalOffset);
+}
+
+FVector UT72TankAIComponent::GetCrewShelterLocation(int32 CrewIndex) const
+{
+	if (!CrewShelterPoint)
+	{
+		return FVector::ZeroVector;
+	}
+
+	const FVector BaseLocation = CrewShelterPoint->GetActorLocation();
+
+	if (CrewCount <= 1)
+	{
+		return BaseLocation;
+	}
+
+	const float AngleStep = 360.0f / FMath::Max(1, CrewCount);
+	const float AngleDeg = AngleStep * CrewIndex;
+	const FVector Offset = FVector(
+		FMath::Cos(FMath::DegreesToRadians(AngleDeg)),
+		FMath::Sin(FMath::DegreesToRadians(AngleDeg)),
+		0.0f
+	) * CrewShelterFormationRadiusCm;
+
+	return BaseLocation + Offset;
+}
+
+UPrimitiveComponent* UT72TankAIComponent::FindTankNavObstacleComponent() const
+{
+	AActor* Owner = GetOwner();
+
+	if (!Owner)
+	{
+		return nullptr;
+	}
+
+	if (USceneComponent* SceneComponent = FindSceneComponentByName(TankNavObstacleComponentName))
+	{
+		if (UPrimitiveComponent* PrimitiveComponent = Cast<UPrimitiveComponent>(SceneComponent))
+		{
+			return PrimitiveComponent;
+		}
+	}
+
+	TArray<UPrimitiveComponent*> Components;
+	Owner->GetComponents<UPrimitiveComponent>(Components);
+
+	for (UPrimitiveComponent* Component : Components)
+	{
+		if (!Component)
+		{
+			continue;
+		}
+
+		if (Component->GetName().Contains(TEXT("TankNavObstacle")))
+		{
+			return Component;
+		}
+	}
+
+	return nullptr;
+}
+
+void UT72TankAIComponent::SetTankNavObstacleActive(bool bActive)
+{
+	UPrimitiveComponent* NavObstacle = FindTankNavObstacleComponent();
+
+	if (!NavObstacle)
+	{
+		DebugLog(FString::Printf(TEXT("[T72 CREW] TankNavObstacle not found | Expected=%s"), *TankNavObstacleComponentName.ToString()));
+		return;
+	}
+
+	NavObstacle->SetCollisionEnabled(bActive ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+	NavObstacle->SetCanEverAffectNavigation(bActive);
+	NavObstacle->RecreatePhysicsState();
+
+	DebugLog(FString::Printf(TEXT("[T72 CREW] TankNavObstacle active=%d | Component=%s"),
+		bActive ? 1 : 0,
+		*GetNameSafe(NavObstacle)));
+}
+
+void UT72TankAIComponent::SpawnCrewFromTankDelayed()
+{
+	SpawnCrewFromTank();
 }
 

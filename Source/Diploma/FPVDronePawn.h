@@ -55,9 +55,33 @@ public:
     float GetBatteryTotalCurrentA() const;
 
     void UpdateTelemetry();
+    UFUNCTION(BlueprintCallable, Category = "FPV")
+    void ForceCrashAtLocation(const FVector& HitLocation);
 
 protected:
     virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
+    //
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Explosion")
+    bool bUseManualExplosionDamage = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Explosion")
+    float ManualExplosionMaxDamage = 200.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Explosion")
+    float ManualExplosionMinDamage = 100.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Explosion")
+    float ManualExplosionInnerRadiusCm = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Explosion")
+    float ManualExplosionOuterRadiusCm = 1000.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Explosion")
+    float ManualExplosionFalloff = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Explosion")
+    float ExplosionDamageOriginZOffset = 80.0f;
+    //
 
 private:
     UPROPERTY(Category = Mesh, VisibleDefaultsOnly, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
@@ -158,20 +182,7 @@ private:
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
     float RotorVerticalCd = 1.2f;
 
-    UPROPERTY(EditAnywhere, Category = "FPV|Explosion")
-    float ExplosionDamage = 125.0f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Explosion")
-    float ExplosionMinimumDamage = 100.0f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Explosion")
-    float ExplosionInnerRadius = 250.0f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Explosion")
-    float ExplosionOuterRadius = 650.0f;
-
-    UPROPERTY(EditAnywhere, Category = "FPV|Explosion")
-    float ExplosionDamageFalloff = 1.0f;
+ 
 
     FFPVDebugState DebugState;
     float DebugLogTimer = 0.f;
