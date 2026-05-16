@@ -356,7 +356,7 @@ public:
 	float CrewSpawnSideOffsetCm = 320.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SPG|Crew")
-	float CrewSpawnFrontOffsetCm = 260.0f;
+	float CrewSpawnFrontOffsetCm = 320.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SPG|Crew")
 	float CrewShelterFormationRadiusCm = 280.0f;
