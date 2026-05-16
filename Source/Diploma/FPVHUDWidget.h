@@ -93,7 +93,7 @@ protected:
 	UTextBlock* Text_Speed;
 
 	UPROPERTY(EditAnywhere, Category = "HUD")
-	float CameraPitchOffsetDeg = 20.f;
+	float CameraPitchOffsetDeg = 0.f;
 
 	UPROPERTY(EditAnywhere, Category = "HUD")
 	float PixelsPerPitchDegree = 4.f;
