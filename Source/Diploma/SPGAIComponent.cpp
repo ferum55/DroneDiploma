@@ -1461,9 +1461,11 @@ void USPGAIComponent::SpawnCrewFromSPG()
 		return;
 	}
 
-	if (!CrewShelterPoint)
+	SelectedAPCEvacRouteIndex = FindNearestAPCRoutePointIndex();
+
+	if (!APCRoutePoints.IsValidIndex(SelectedAPCEvacRouteIndex))
 	{
-		DebugLog(TEXT("[SPG CREW] CrewShelterPoint is NULL"));
+		DebugLog(TEXT("[SPG CREW] No valid APC evacuation route point found"));
 		return;
 	}
 
@@ -1474,7 +1476,7 @@ void USPGAIComponent::SpawnCrewFromSPG()
 	SpawnedCrew.Empty();
 	PendingCrewSpawnIndex = 0;
 
-	SpawnAPCForCrewEvacuation();
+	RequestAPCSpawnForCrewEvacuation();
 
 	GetWorld()->GetTimerManager().ClearTimer(CrewSpawnStepTimerHandle);
 	GetWorld()->GetTimerManager().SetTimer(CrewSpawnStepTimerHandle, this, &USPGAIComponent::SpawnNextCrewMember, CrewSpawnIntervalSeconds, false);
@@ -1558,8 +1560,12 @@ AInfantryCharacter* USPGAIComponent::SpawnSingleCrewMember(int32 CrewIndex)
 		DebugLog(FString::Printf(TEXT("[SPG CREW] Crew member has no InfantryAIController | Pawn=%s"), *GetNameSafe(CrewMember)));
 	}
 
-	DebugLog(FString::Printf(TEXT("[SPG CREW] Spawned crew member %d | Pawn=%s Shelter=%s"), CrewIndex, *GetNameSafe(CrewMember), *GetNameSafe(CrewShelterPoint)));
-
+	DebugLog(FString::Printf(
+		TEXT("[SPG CREW] Spawned crew member %d | Pawn=%s Shelter=%s"),
+		CrewIndex,
+		*GetNameSafe(CrewMember),
+		*GetNameSafe(GetSelectedAPCEvacPoint())
+	));
 	return CrewMember;
 }
 
@@ -1604,12 +1610,14 @@ FVector USPGAIComponent::GetCrewSpawnLocation(int32 CrewIndex) const
 
 FVector USPGAIComponent::GetCrewShelterLocation(int32 CrewIndex) const
 {
-	if (!CrewShelterPoint)
+	AActor* EvacPoint = GetSelectedAPCEvacPoint();
+
+	if (!EvacPoint)
 	{
 		return FVector::ZeroVector;
 	}
 
-	const FVector BaseLocation = CrewShelterPoint->GetActorLocation();
+	const FVector BaseLocation = EvacPoint->GetActorLocation();
 
 	if (CrewCount <= 1)
 	{
@@ -1653,9 +1661,9 @@ void USPGAIComponent::SpawnAPCForCrewEvacuation()
 		return;
 	}
 
-	if (!APCEvacPoint)
+	if (!APCRoutePoints.IsValidIndex(SelectedAPCEvacRouteIndex))
 	{
-		DebugLog(TEXT("[SPG APC] APCEvacPoint is NULL"));
+		DebugLog(TEXT("[SPG APC] Selected APC evacuation route index is invalid"));
 		return;
 	}
 
@@ -1665,7 +1673,12 @@ void USPGAIComponent::SpawnAPCForCrewEvacuation()
 	SpawnParams.Owner = GetOwner();
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
-	SpawnedAPC = GetWorld()->SpawnActor<AActor>(APCClass, APCSpawnPoint->GetActorLocation(), APCSpawnPoint->GetActorRotation(), SpawnParams);
+	SpawnedAPC = GetWorld()->SpawnActor<AActor>(
+		APCClass,
+		APCSpawnPoint->GetActorLocation(),
+		APCSpawnPoint->GetActorRotation(),
+		SpawnParams
+	);
 
 	if (!SpawnedAPC)
 	{
@@ -1682,21 +1695,14 @@ void USPGAIComponent::SpawnAPCForCrewEvacuation()
 	}
 
 	APCAI->SetEvacuationCrew(SpawnedCrew);
-
-	if (APCBoardingMovePoint)
-	{
-		APCAI->SetBoardingMovePoint(APCBoardingMovePoint);
-	}
-
-	APCAI->StartEvacuation(APCEvacPoint, APCReturnPoint);
+	APCAI->StartEvacuation(APCSpawnPoint, APCRoutePoints, SelectedAPCEvacRouteIndex);
 
 	DebugLog(FString::Printf(
-		TEXT("[SPG APC] Spawned and started | APC=%s Crew=%d Evac=%s Return=%s Boarding=%s"),
+		TEXT("[SPG APC] Spawned and started | APC=%s Crew=%d EvacIndex=%d EvacPoint=%s"),
 		*GetNameSafe(SpawnedAPC),
 		SpawnedCrew.Num(),
-		*GetNameSafe(APCEvacPoint),
-		*GetNameSafe(APCReturnPoint),
-		*GetNameSafe(APCBoardingMovePoint)
+		SelectedAPCEvacRouteIndex,
+		*GetNameSafe(APCRoutePoints[SelectedAPCEvacRouteIndex])
 	));
 }
 
@@ -2541,6 +2547,7 @@ void USPGAIComponent::ClearDamageTimers()
 	GetWorld()->GetTimerManager().ClearTimer(CrewSpawnDelayTimerHandle);
 	GetWorld()->GetTimerManager().ClearTimer(CrewSpawnStepTimerHandle);
 	GetWorld()->GetTimerManager().ClearTimer(DestroyedWreckageTimerHandle);
+	GetWorld()->GetTimerManager().ClearTimer(APCSpawnDelayTimerHandle);
 }
 
 void USPGAIComponent::DebugLog(const FString& Message) const
@@ -2549,4 +2556,74 @@ void USPGAIComponent::DebugLog(const FString& Message) const
 	{
 		UE_LOG(LogTemp, Warning, TEXT("%s"), *Message);
 	}
+}
+
+int32 USPGAIComponent::FindNearestAPCRoutePointIndex() const
+{
+	AActor* Owner = GetOwner();
+
+	if (!Owner)
+	{
+		return INDEX_NONE;
+	}
+
+	int32 BestIndex = INDEX_NONE;
+	float BestDistanceSq = TNumericLimits<float>::Max();
+
+	const FVector ReferenceLocation = Owner->GetActorLocation();
+
+	for (int32 i = 0; i < APCRoutePoints.Num(); ++i)
+	{
+		AActor* RoutePoint = APCRoutePoints[i];
+
+		if (!RoutePoint)
+		{
+			continue;
+		}
+
+		const float DistanceSq = FVector::DistSquared2D(ReferenceLocation, RoutePoint->GetActorLocation());
+
+		if (DistanceSq < BestDistanceSq)
+		{
+			BestDistanceSq = DistanceSq;
+			BestIndex = i;
+		}
+	}
+
+	return BestIndex;
+}
+
+AActor* USPGAIComponent::GetSelectedAPCEvacPoint() const
+{
+	if (!APCRoutePoints.IsValidIndex(SelectedAPCEvacRouteIndex))
+	{
+		return nullptr;
+	}
+
+	return APCRoutePoints[SelectedAPCEvacRouteIndex];
+}
+
+void USPGAIComponent::RequestAPCSpawnForCrewEvacuation()
+{
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	if (APCSpawnDelaySeconds > 0.0f)
+	{
+		GetWorld()->GetTimerManager().ClearTimer(APCSpawnDelayTimerHandle);
+		GetWorld()->GetTimerManager().SetTimer(
+			APCSpawnDelayTimerHandle,
+			this,
+			&USPGAIComponent::SpawnAPCForCrewEvacuation,
+			APCSpawnDelaySeconds,
+			false
+		);
+
+		DebugLog(FString::Printf(TEXT("[SPG APC] Spawn delayed by %.1f seconds"), APCSpawnDelaySeconds));
+		return;
+	}
+
+	SpawnAPCForCrewEvacuation();
 }

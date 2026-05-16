@@ -338,9 +338,6 @@ public:
 	TSubclassOf<AInfantryCharacter> CrewInfantryClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SPG|Crew")
-	AActor* CrewShelterPoint = nullptr;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SPG|Crew")
 	int32 CrewCount = 4;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SPG|Crew")
@@ -373,14 +370,11 @@ public:
 	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "SPG|APC Evacuation")
 	AActor* APCSpawnPoint = nullptr;
 
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "SPG|APC Evacuation")
-	AActor* APCEvacPoint = nullptr;
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "APC Evacuation")
+	TArray<AActor*> APCRoutePoints;
 
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "SPG|APC Evacuation")
-	AActor* APCReturnPoint = nullptr;
-
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "SPG|APC Evacuation")
-	AActor* APCBoardingMovePoint = nullptr;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "APC Evacuation")
+	float APCSpawnDelaySeconds = 20.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SPG|Debug")
 	bool bDebugLogs = true;
@@ -413,6 +407,15 @@ public:
 	int32 GetSpawnedCrewCount() const;
 
 private:
+
+	FTimerHandle APCSpawnDelayTimerHandle;
+
+	int32 SelectedAPCEvacRouteIndex = INDEX_NONE;
+
+	int32 FindNearestAPCRoutePointIndex() const;
+	AActor* GetSelectedAPCEvacPoint() const;
+	void RequestAPCSpawnForCrewEvacuation();
+
 	UPROPERTY()
 	USkeletalMeshComponent* MeshComponent = nullptr;
 

@@ -132,18 +132,41 @@ void UAPCAIComponent::ApplyDefaultAssetReferences()
 	}
 }
 
-void UAPCAIComponent::StartEvacuation(AActor* InEvacPoint, AActor* InReturnPoint)
+void UAPCAIComponent::StartEvacuation(AActor* InHomePoint, const TArray<AActor*>& InRoutePoints, int32 InEvacRouteIndex)
 {
 	if (bDestroyed)
 	{
 		return;
 	}
 
-	EvacPoint = InEvacPoint;
-	ReturnPoint = InReturnPoint;
+	if (GetWorld())
+	{
+		GetWorld()->GetTimerManager().ClearTimer(AutoStartTimerHandle);
+	}
+
+	HomePoint = InHomePoint;
+	EvacuationRoutePoints = InRoutePoints;
+	EvacRouteIndex = InEvacRouteIndex;
+	CurrentForwardRouteIndex = 0;
+	CurrentReturnRouteIndex = INDEX_NONE;
+
 	LoadedCrewCount = 0;
 	PendingCrewMember = nullptr;
 	bAssignedCrewOrderedToBoard = false;
+
+	if (!HomePoint)
+	{
+		DebugLog(TEXT("[APC] StartEvacuation failed: HomePoint is null"));
+		return;
+	}
+
+	if (!EvacuationRoutePoints.IsValidIndex(EvacRouteIndex))
+	{
+		DebugLog(TEXT("[APC] StartEvacuation failed: EvacRouteIndex is invalid"));
+		return;
+	}
+
+	EvacPoint = EvacuationRoutePoints[EvacRouteIndex];
 
 	if (!EvacPoint)
 	{
@@ -155,9 +178,25 @@ void UAPCAIComponent::StartEvacuation(AActor* InEvacPoint, AActor* InReturnPoint
 	SetHatchAngle(0.0f);
 	SetState(EAPCAIState::MoveToEvacPoint);
 
-	DebugLog(FString::Printf(TEXT("[APC] StartEvacuation | EvacPoint=%s ReturnPoint=%s"),
+	DebugLog(FString::Printf(
+		TEXT("[APC] StartEvacuation | Home=%s Evac=%s RouteCount=%d EvacIndex=%d"),
+		*GetNameSafe(HomePoint),
 		*GetNameSafe(EvacPoint),
-		*GetNameSafe(ReturnPoint)));
+		EvacuationRoutePoints.Num(),
+		EvacRouteIndex
+	));
+}
+
+bool UAPCAIComponent::IsAtActor2D(AActor* TargetActor) const
+{
+	const AActor* Owner = GetOwner();
+
+	if (!Owner || !TargetActor)
+	{
+		return false;
+	}
+
+	return FVector::Dist2D(Owner->GetActorLocation(), TargetActor->GetActorLocation()) <= AcceptanceRadiusCm;
 }
 
 void UAPCAIComponent::DestroyAPC(const FVector& HitLocation)
@@ -393,7 +432,7 @@ void UAPCAIComponent::TickState(float DeltaTime)
 		break;
 
 	case EAPCAIState::MoveToEvacPoint:
-		TickMoveToTarget(DeltaTime, EvacPoint, EAPCAIState::OpeningRearDoors);
+		TickMoveToEvacRoute(DeltaTime);
 		break;
 
 	case EAPCAIState::OpeningRearDoors:
@@ -426,19 +465,13 @@ void UAPCAIComponent::TickState(float DeltaTime)
 
 		if (FMath::Abs(CurrentRearDoorsAngle) <= 2.0f)
 		{
-			if (ReturnPoint)
-			{
-				SetState(EAPCAIState::Returning);
-			}
-			else
-			{
-				SetState(EAPCAIState::Inactive);
-			}
+			CurrentReturnRouteIndex = EvacRouteIndex - 1;
+			SetState(EAPCAIState::Returning);
 		}
 		break;
 
 	case EAPCAIState::Returning:
-		TickMoveToTarget(DeltaTime, ReturnPoint, EAPCAIState::Inactive);
+		TickReturnRoute(DeltaTime);
 		break;
 
 	case EAPCAIState::Destroyed:
@@ -450,6 +483,38 @@ void UAPCAIComponent::TickState(float DeltaTime)
 	default:
 		break;
 	}
+}
+
+void UAPCAIComponent::TickMoveToEvacRoute(float DeltaTime)
+{
+	if (!EvacuationRoutePoints.IsValidIndex(EvacRouteIndex))
+	{
+		SetWheelSpeed(0.0f);
+		return;
+	}
+
+	if (CurrentForwardRouteIndex <= EvacRouteIndex)
+	{
+		AActor* TargetPoint = EvacuationRoutePoints[CurrentForwardRouteIndex];
+
+		if (!TargetPoint)
+		{
+			CurrentForwardRouteIndex++;
+			return;
+		}
+
+		TickMoveToTarget(DeltaTime, TargetPoint, EAPCAIState::MoveToEvacPoint);
+
+		if (IsAtActor2D(TargetPoint))
+		{
+			CurrentForwardRouteIndex++;
+		}
+
+		return;
+	}
+
+	SetWheelSpeed(0.0f);
+	SetState(EAPCAIState::OpeningRearDoors);
 }
 
 void UAPCAIComponent::TickMoveToTarget(float DeltaTime, AActor* TargetActor, EAPCAIState ArrivedState)
@@ -1181,7 +1246,6 @@ void UAPCAIComponent::AutoStartEvacuation()
 	}
 
 	AActor* ResolvedEvacPoint = ResolveScenarioPoint(DefaultEvacPoint, DefaultEvacPointName);
-	AActor* ResolvedReturnPoint = ResolveScenarioPoint(DefaultReturnPoint, DefaultReturnPointName);
 
 	if (!ResolvedEvacPoint)
 	{
@@ -1191,9 +1255,11 @@ void UAPCAIComponent::AutoStartEvacuation()
 		return;
 	}
 
-	StartEvacuation(ResolvedEvacPoint, ResolvedReturnPoint);
-}
+	TArray<AActor*> AutoRoutePoints;
+	AutoRoutePoints.Add(ResolvedEvacPoint);
 
+	StartEvacuation(GetOwner(), AutoRoutePoints, 0);
+}
 AActor* UAPCAIComponent::ResolveScenarioPoint(AActor* DirectActor, FName ActorName) const
 {
 	if (DirectActor)
@@ -1494,4 +1560,37 @@ bool UAPCAIComponent::ShouldFinishBoarding() const
 	}
 
 	return GetRemainingAssignedCrewCount() <= 0;
+}
+
+void UAPCAIComponent::TickReturnRoute(float DeltaTime)
+{
+	if (CurrentReturnRouteIndex >= 0)
+	{
+		AActor* TargetPoint = EvacuationRoutePoints.IsValidIndex(CurrentReturnRouteIndex)
+			? EvacuationRoutePoints[CurrentReturnRouteIndex]
+			: nullptr;
+
+		if (!TargetPoint)
+		{
+			CurrentReturnRouteIndex--;
+			return;
+		}
+
+		TickMoveToTarget(DeltaTime, TargetPoint, EAPCAIState::Returning);
+
+		if (IsAtActor2D(TargetPoint))
+		{
+			CurrentReturnRouteIndex--;
+		}
+
+		return;
+	}
+
+	if (HomePoint)
+	{
+		TickMoveToTarget(DeltaTime, HomePoint, EAPCAIState::Inactive);
+		return;
+	}
+
+	SetState(EAPCAIState::Inactive);
 }

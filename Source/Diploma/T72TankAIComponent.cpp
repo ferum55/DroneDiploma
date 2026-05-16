@@ -1589,7 +1589,6 @@ void UT72TankAIComponent::ApplyEngineMobilityFailure()
 	OpenHatches();
 	StartHatchSmoke();
 	SetState(ET72TankAIState::Burning);
-	SpawnCrewFromTank();
 	DebugLog(TEXT("[T72 DAMAGE] Engine mobility failed, turret speed reduced, crew evacuation started"));
 }
 
@@ -1950,9 +1949,11 @@ void UT72TankAIComponent::SpawnCrewFromTank()
 		return;
 	}
 
-	if (!CrewShelterPoint)
+	SelectedAPCEvacRouteIndex = FindNearestAPCRoutePointIndex();
+
+	if (!APCRoutePoints.IsValidIndex(SelectedAPCEvacRouteIndex))
 	{
-		DebugLog(TEXT("[T72 CREW] CrewShelterPoint is NULL"));
+		DebugLog(TEXT("[T72 CREW] No valid Tank evacuation route point found"));
 		return;
 	}
 
@@ -1963,7 +1964,7 @@ void UT72TankAIComponent::SpawnCrewFromTank()
 	SpawnedCrew.Empty();
 	PendingCrewSpawnIndex = 0;
 
-	SpawnAPCForCrewEvacuation();
+	RequestAPCSpawnForCrewEvacuation();
 
 	GetWorld()->GetTimerManager().ClearTimer(CrewSpawnStepTimerHandle);
 	GetWorld()->GetTimerManager().SetTimer(
@@ -1976,7 +1977,6 @@ void UT72TankAIComponent::SpawnCrewFromTank()
 
 	DebugLog(TEXT("[T72 CREW] Crew stagger spawn started"));
 }
-
 
 void UT72TankAIComponent::SpawnAPCForCrewEvacuation()
 {
@@ -2003,9 +2003,9 @@ void UT72TankAIComponent::SpawnAPCForCrewEvacuation()
 		return;
 	}
 
-	if (!APCEvacPoint)
+	if (!APCRoutePoints.IsValidIndex(SelectedAPCEvacRouteIndex))
 	{
-		DebugLog(TEXT("[T72 APC] APCEvacPoint is NULL"));
+		DebugLog(TEXT("[T72 APC] Selected APC evacuation route index is invalid"));
 		return;
 	}
 
@@ -2037,20 +2037,15 @@ void UT72TankAIComponent::SpawnAPCForCrewEvacuation()
 	}
 
 	APCAI->SetEvacuationCrew(SpawnedCrew);
+	APCAI->StartEvacuation(APCSpawnPoint, APCRoutePoints, SelectedAPCEvacRouteIndex);
 
-	if (APCBoardingMovePoint)
-	{
-		APCAI->SetBoardingMovePoint(APCBoardingMovePoint);
-	}
-
-	APCAI->StartEvacuation(APCEvacPoint, APCReturnPoint);
-
-	DebugLog(FString::Printf(TEXT("[T72 APC] Spawned and started | APC=%s Crew=%d Evac=%s Return=%s Boarding=%s"),
+	DebugLog(FString::Printf(
+		TEXT("[T72 APC] Spawned and started | APC=%s Crew=%d EvacIndex=%d EvacPoint=%s"),
 		*GetNameSafe(SpawnedAPC),
 		SpawnedCrew.Num(),
-		*GetNameSafe(APCEvacPoint),
-		*GetNameSafe(APCReturnPoint),
-		*GetNameSafe(APCBoardingMovePoint)));
+		SelectedAPCEvacRouteIndex,
+		*GetNameSafe(APCRoutePoints[SelectedAPCEvacRouteIndex])
+	));
 }
 
 UAPCAIComponent* UT72TankAIComponent::FindAPCAIComponent(AActor* APCActor) const
@@ -2179,6 +2174,7 @@ void UT72TankAIComponent::ClearDamageTimers()
 	GetWorld()->GetTimerManager().ClearTimer(TrackCrewEvacTimerHandle);
 	GetWorld()->GetTimerManager().ClearTimer(CrewSpawnDelayTimerHandle);
 	GetWorld()->GetTimerManager().ClearTimer(CrewSpawnStepTimerHandle);
+	GetWorld()->GetTimerManager().ClearTimer(APCSpawnDelayTimerHandle);
 }
 
 
@@ -2394,12 +2390,14 @@ FVector UT72TankAIComponent::TransformGroundTraceOffset(const FVector& DesiredLo
 
 FVector UT72TankAIComponent::GetCrewShelterLocation(int32 CrewIndex) const
 {
-	if (!CrewShelterPoint)
+	AActor* EvacPoint = GetSelectedAPCEvacPoint();
+
+	if (!EvacPoint)
 	{
 		return FVector::ZeroVector;
 	}
 
-	const FVector BaseLocation = CrewShelterPoint->GetActorLocation();
+	const FVector BaseLocation = EvacPoint->GetActorLocation();
 
 	if (CrewCount <= 1)
 	{
@@ -2569,10 +2567,12 @@ AInfantryCharacter* UT72TankAIComponent::SpawnSingleCrewMember(int32 CrewIndex)
 		DebugLog(FString::Printf(TEXT("[T72 CREW] Crew member has no InfantryAIController | Pawn=%s"), *GetNameSafe(CrewMember)));
 	}
 
-	DebugLog(FString::Printf(TEXT("[T72 CREW] Spawned crew member %d | Pawn=%s Shelter=%s"),
+	DebugLog(FString::Printf(
+		TEXT("[T72 CREW] Spawned crew member %d | Pawn=%s Shelter=%s"),
 		CrewIndex,
 		*GetNameSafe(CrewMember),
-		*GetNameSafe(CrewShelterPoint)));
+		*GetNameSafe(GetSelectedAPCEvacPoint())
+	));
 
 	return CrewMember;
 }
@@ -2592,4 +2592,74 @@ void UT72TankAIComponent::UpdateAPCCrewAssignment()
 	}
 
 	APCAI->SetEvacuationCrew(SpawnedCrew);
+}
+
+int32 UT72TankAIComponent::FindNearestAPCRoutePointIndex() const
+{
+	AActor* Owner = GetOwner();
+
+	if (!Owner)
+	{
+		return INDEX_NONE;
+	}
+
+	int32 BestIndex = INDEX_NONE;
+	float BestDistanceSq = TNumericLimits<float>::Max();
+
+	const FVector ReferenceLocation = Owner->GetActorLocation();
+
+	for (int32 i = 0; i < APCRoutePoints.Num(); ++i)
+	{
+		AActor* RoutePoint = APCRoutePoints[i];
+
+		if (!RoutePoint)
+		{
+			continue;
+		}
+
+		const float DistanceSq = FVector::DistSquared2D(ReferenceLocation, RoutePoint->GetActorLocation());
+
+		if (DistanceSq < BestDistanceSq)
+		{
+			BestDistanceSq = DistanceSq;
+			BestIndex = i;
+		}
+	}
+
+	return BestIndex;
+}
+
+AActor* UT72TankAIComponent::GetSelectedAPCEvacPoint() const
+{
+	if (!APCRoutePoints.IsValidIndex(SelectedAPCEvacRouteIndex))
+	{
+		return nullptr;
+	}
+
+	return APCRoutePoints[SelectedAPCEvacRouteIndex];
+}
+
+void UT72TankAIComponent::RequestAPCSpawnForCrewEvacuation()
+{
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	if (APCSpawnDelaySeconds > 0.0f)
+	{
+		GetWorld()->GetTimerManager().ClearTimer(APCSpawnDelayTimerHandle);
+		GetWorld()->GetTimerManager().SetTimer(
+			APCSpawnDelayTimerHandle,
+			this,
+			&UT72TankAIComponent::SpawnAPCForCrewEvacuation,
+			APCSpawnDelaySeconds,
+			false
+		);
+
+		DebugLog(FString::Printf(TEXT("[T72 APC] Spawn delayed by %.1f seconds"), APCSpawnDelaySeconds));
+		return;
+	}
+
+	SpawnAPCForCrewEvacuation();
 }

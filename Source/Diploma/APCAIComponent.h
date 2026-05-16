@@ -38,7 +38,7 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	UFUNCTION(BlueprintCallable, Category = "APC")
-	void StartEvacuation(AActor* InEvacPoint, AActor* InReturnPoint);
+	void StartEvacuation(AActor* InHomePoint, const TArray<AActor*>& InRoutePoints, int32 InEvacRouteIndex);
 
 	UFUNCTION(BlueprintCallable, Category = "APC")
 	void DestroyAPC(const FVector& HitLocation);
@@ -179,7 +179,7 @@ protected:
 	bool bDebugLogs = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "APC|Scenario")
-	bool bAutoStartEvacuation = true;
+	bool bAutoStartEvacuation = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "APC|Scenario")
 	float AutoStartDelaySeconds = 1.0f;
@@ -187,14 +187,9 @@ protected:
 	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "APC|Scenario")
 	AActor* DefaultEvacPoint = nullptr;
 
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "APC|Scenario")
-	AActor* DefaultReturnPoint = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "APC|Scenario")
 	FName DefaultEvacPointName = TEXT("TP_APC_Evac");
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "APC|Scenario")
-	FName DefaultReturnPointName = TEXT("TP_APC_Return");
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "APC|Debug")
 	bool bMovementDebugLogs = true;
@@ -239,7 +234,18 @@ private:
 	AActor* EvacPoint = nullptr;
 
 	UPROPERTY()
-	AActor* ReturnPoint = nullptr;
+	AActor* HomePoint = nullptr;
+
+	UPROPERTY()
+	TArray<AActor*> EvacuationRoutePoints;
+
+	int32 EvacRouteIndex = INDEX_NONE;
+	int32 CurrentForwardRouteIndex = 0;
+	int32 CurrentReturnRouteIndex = INDEX_NONE;
+
+	void TickMoveToEvacRoute(float DeltaTime);
+	void TickReturnRoute(float DeltaTime);
+	bool IsAtActor2D(AActor* TargetActor) const;
 
 	UPROPERTY()
 	AInfantryCharacter* PendingCrewMember = nullptr;

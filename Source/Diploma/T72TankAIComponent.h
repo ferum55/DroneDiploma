@@ -333,9 +333,6 @@ public:
 	TSubclassOf<AInfantryCharacter> CrewInfantryClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
-	AActor* CrewShelterPoint = nullptr;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
 	int32 CrewCount = 3;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
@@ -375,16 +372,21 @@ protected:
 	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "T72|APC Evacuation")
 	AActor* APCSpawnPoint = nullptr;
 
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "T72|APC Evacuation")
-	AActor* APCEvacPoint = nullptr;
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "APC Evacuation")
+	TArray<AActor*> APCRoutePoints;
 
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "T72|APC Evacuation")
-	AActor* APCReturnPoint = nullptr;
-
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "T72|APC Evacuation")
-	AActor* APCBoardingMovePoint = nullptr;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "APC Evacuation")
+	float APCSpawnDelaySeconds = 20.0f;
 
 private:
+
+	FTimerHandle APCSpawnDelayTimerHandle;
+
+	int32 SelectedAPCEvacRouteIndex = INDEX_NONE;
+
+	int32 FindNearestAPCRoutePointIndex() const;
+	AActor* GetSelectedAPCEvacPoint() const;
+	void RequestAPCSpawnForCrewEvacuation();
 
 	FTimerHandle CrewSpawnStepTimerHandle;
 
