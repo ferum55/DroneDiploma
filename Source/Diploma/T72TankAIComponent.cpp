@@ -14,6 +14,7 @@
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 #include "FPVDronePawn.h"
+#include "APCAIComponent.h"
 
 UT72TankAIComponent::UT72TankAIComponent()
 {
@@ -79,6 +80,9 @@ void UT72TankAIComponent::BeginPlay()
 	bCrewEvacuated = false;
 	bCrewSpawned = false;
 	SpawnedCrew.Empty();
+	TankCrewInsideCount = CrewCount;
+	SpawnedAPC = nullptr;
+	bAPCSpawned = false;
 
 	SetTankNavObstacleActive(false);
 
@@ -91,8 +95,7 @@ void UT72TankAIComponent::BeginPlay()
 	{
 		StartMission();
 	}
-	bCrewSpawned = false;
-	SpawnedCrew.Empty();
+
 }
 
 void UT72TankAIComponent::ApplyDefaultAssetReferences()
@@ -594,11 +597,6 @@ void UT72TankAIComponent::TickState(float DeltaTime)
 	case ET72TankAIState::TrackTurnReaction:
 		TickTrackTurnReaction(DeltaTime);
 		break;
-
-	case ET72TankAIState::TrackFinalShot:
-		TickTrackFinalShot(DeltaTime);
-		break;
-
 	case ET72TankAIState::TrackCrewEvacWait:
 		if (!bGunDestroyed)
 		{
@@ -981,7 +979,7 @@ void UT72TankAIComponent::OnArrivedAtTarget()
 
 void UT72TankAIComponent::BeginFirePositionPatrol()
 {
-	if (bTankDestroyed || bMobilityDestroyed || bGunDestroyed || CurrentState == ET72TankAIState::Destroyed || CurrentState == ET72TankAIState::Immobilized || CurrentState == ET72TankAIState::Burning || CurrentState == ET72TankAIState::TrackTurnReaction || CurrentState == ET72TankAIState::TrackFinalShot || CurrentState == ET72TankAIState::TrackCrewEvacWait)
+	if (bTankDestroyed || bMobilityDestroyed || bGunDestroyed || CurrentState == ET72TankAIState::Destroyed || CurrentState == ET72TankAIState::Immobilized || CurrentState == ET72TankAIState::Burning || CurrentState == ET72TankAIState::TrackTurnReaction || CurrentState == ET72TankAIState::TrackCrewEvacWait)
 	{
 		SetWheelSpeed(0.0f);
 		return;
@@ -1283,7 +1281,7 @@ void UT72TankAIComponent::NotifyDroneImpactOrNearMiss(FVector ImpactLocation, bo
 {
 	AActor* Owner = GetOwner();
 
-	if (!Owner || bTankDestroyed || bMobilityDestroyed || CurrentState == ET72TankAIState::Destroyed || CurrentState == ET72TankAIState::Immobilized || CurrentState == ET72TankAIState::Burning || CurrentState == ET72TankAIState::TrackTurnReaction || CurrentState == ET72TankAIState::TrackFinalShot || CurrentState == ET72TankAIState::TrackCrewEvacWait)
+	if (!Owner || bTankDestroyed || bMobilityDestroyed || CurrentState == ET72TankAIState::Destroyed || CurrentState == ET72TankAIState::Immobilized || CurrentState == ET72TankAIState::Burning || CurrentState == ET72TankAIState::TrackTurnReaction || CurrentState == ET72TankAIState::TrackCrewEvacWait)
 	{
 		return;
 	}
@@ -1346,7 +1344,7 @@ void UT72TankAIComponent::StartTrackDamageSequence(ET72DamageZone Zone)
 	bFirePatrolFirstShotDone = false;
 	DamagedTrackZone = Zone;
 	TrackTurnDirection = Zone == ET72DamageZone::LeftTrack ? -1 : 1;
-	bTrackFinalShotFired = false;
+	
 
 	SetFiringActive(false);
 	SetWheelSpeed(0.0f);
@@ -1435,44 +1433,11 @@ void UT72TankAIComponent::FinishTrackTurnReaction()
 
 	SetWheelSpeed(0.0f);
 	SetFiringActive(false);
-	FireTimer = FireInterval;
+	FireTimer = 0.0f;
 
-	if (bGunDestroyed)
-	{
-		StartTrackCrewEvacTimer();
-		DebugLog(TEXT("[T72 DAMAGE] Track turn reaction finished, gun destroyed, final shot skipped"));
-		return;
-	}
+	StartTrackCrewEvacTimer();
 
-	SetState(ET72TankAIState::TrackFinalShot);
-
-	DebugLog(TEXT("[T72 DAMAGE] Track turn reaction finished, final shot allowed"));
-}
-
-void UT72TankAIComponent::TickTrackFinalShot(float DeltaTime)
-{
-	SetWheelSpeed(0.0f);
-
-	if (bTankDestroyed || bGunDestroyed || bCrewEvacuated)
-	{
-		StartTrackCrewEvacTimer();
-		return;
-	}
-
-	TickAiming(DeltaTime);
-
-	if (FriendlyPosition && !IsAimedAtFriendly())
-	{
-		return;
-	}
-
-	if (!bTrackFinalShotFired)
-	{
-		bTrackFinalShotFired = true;
-		FireWeapon();
-		DebugLog(TEXT("[T72 DAMAGE] Final shot after track damage"));
-		StartTrackCrewEvacTimer();
-	}
+	DebugLog(TEXT("[T72 DAMAGE] Track turn reaction finished, crew evacuation timer started"));
 }
 
 void UT72TankAIComponent::StartTrackCrewEvacTimer()
@@ -1992,55 +1957,120 @@ void UT72TankAIComponent::SpawnCrewFromTank()
 	}
 
 	bCrewSpawned = true;
+	bCrewEvacuated = true;
+	TankCrewInsideCount = 0;
+
 	SpawnedCrew.Empty();
+	PendingCrewSpawnIndex = 0;
 
-	AActor* Owner = GetOwner();
-	const FRotator BaseRotation = Owner ? Owner->GetActorRotation() : FRotator::ZeroRotator;
+	SpawnAPCForCrewEvacuation();
 
-	for (int32 i = 0; i < CrewCount; i++)
+	GetWorld()->GetTimerManager().ClearTimer(CrewSpawnStepTimerHandle);
+	GetWorld()->GetTimerManager().SetTimer(
+		CrewSpawnStepTimerHandle,
+		this,
+		&UT72TankAIComponent::SpawnNextCrewMember,
+		CrewSpawnIntervalSeconds,
+		false
+	);
+
+	DebugLog(TEXT("[T72 CREW] Crew stagger spawn started"));
+}
+
+
+void UT72TankAIComponent::SpawnAPCForCrewEvacuation()
+{
+	if (bAPCSpawned)
 	{
-		const FVector SpawnLocation = GetCrewSpawnLocation(i);
-		const FRotator SpawnRotation(0.0f, BaseRotation.Yaw + FMath::RandRange(-35.0f, 35.0f), 0.0f);
-
-		FActorSpawnParameters SpawnParams;
-		SpawnParams.Owner = Owner;
-		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-
-		AInfantryCharacter* CrewMember = GetWorld()->SpawnActor<AInfantryCharacter>(
-			CrewInfantryClass,
-			SpawnLocation,
-			SpawnRotation,
-			SpawnParams
-		);
-
-		if (!CrewMember)
-		{
-			DebugLog(FString::Printf(TEXT("[T72 CREW] Failed to spawn crew member %d"), i));
-			continue;
-		}
-
-		CrewMember->SpawnDefaultController();
-		CrewMember->SetRunning(true);
-		CrewMember->SetAIAnimState(TEXT("ReturnToPost"));
-
-		SpawnedCrew.Add(CrewMember);
-
-		AInfantryAIController* CrewController = Cast<AInfantryAIController>(CrewMember->GetController());
-
-		if (CrewController)
-		{
-			CrewController->BeginMissionObjectiveMoveToLocation(GetCrewShelterLocation(i), true);
-		}
-		else
-		{
-			DebugLog(FString::Printf(TEXT("[T72 CREW] Crew member has no InfantryAIController | Pawn=%s"), *GetNameSafe(CrewMember)));
-		}
-
-		DebugLog(FString::Printf(TEXT("[T72 CREW] Spawned crew member %d | Pawn=%s Shelter=%s"),
-			i,
-			*GetNameSafe(CrewMember),
-			*GetNameSafe(CrewShelterPoint)));
+		DebugLog(TEXT("[T72 APC] APC already spawned"));
+		return;
 	}
+
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	if (!APCClass)
+	{
+		DebugLog(TEXT("[T72 APC] APCClass is NULL"));
+		return;
+	}
+
+	if (!APCSpawnPoint)
+	{
+		DebugLog(TEXT("[T72 APC] APCSpawnPoint is NULL"));
+		return;
+	}
+
+	if (!APCEvacPoint)
+	{
+		DebugLog(TEXT("[T72 APC] APCEvacPoint is NULL"));
+		return;
+	}
+
+	bAPCSpawned = true;
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = GetOwner();
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+	SpawnedAPC = GetWorld()->SpawnActor<AActor>(
+		APCClass,
+		APCSpawnPoint->GetActorLocation(),
+		APCSpawnPoint->GetActorRotation(),
+		SpawnParams
+	);
+
+	if (!SpawnedAPC)
+	{
+		DebugLog(TEXT("[T72 APC] Failed to spawn APC"));
+		return;
+	}
+
+	UAPCAIComponent* APCAI = FindAPCAIComponent(SpawnedAPC);
+
+	if (!APCAI)
+	{
+		DebugLog(FString::Printf(TEXT("[T72 APC] APCAIComponent not found | APC=%s"), *GetNameSafe(SpawnedAPC)));
+		return;
+	}
+
+	APCAI->SetEvacuationCrew(SpawnedCrew);
+
+	if (APCBoardingMovePoint)
+	{
+		APCAI->SetBoardingMovePoint(APCBoardingMovePoint);
+	}
+
+	APCAI->StartEvacuation(APCEvacPoint, APCReturnPoint);
+
+	DebugLog(FString::Printf(TEXT("[T72 APC] Spawned and started | APC=%s Crew=%d Evac=%s Return=%s Boarding=%s"),
+		*GetNameSafe(SpawnedAPC),
+		SpawnedCrew.Num(),
+		*GetNameSafe(APCEvacPoint),
+		*GetNameSafe(APCReturnPoint),
+		*GetNameSafe(APCBoardingMovePoint)));
+}
+
+UAPCAIComponent* UT72TankAIComponent::FindAPCAIComponent(AActor* APCActor) const
+{
+	if (!APCActor)
+	{
+		return nullptr;
+	}
+
+	return APCActor->FindComponentByClass<UAPCAIComponent>();
+}
+
+int32 UT72TankAIComponent::GetTankCrewInsideCount() const
+{
+	return TankCrewInsideCount;
+}
+
+int32 UT72TankAIComponent::GetSpawnedCrewCount() const
+{
+	return SpawnedCrew.Num();
 }
 
 USkeletalMeshComponent* UT72TankAIComponent::FindTankMesh() const
@@ -2148,6 +2178,7 @@ void UT72TankAIComponent::ClearDamageTimers()
 	GetWorld()->GetTimerManager().ClearTimer(TrackTurnReactionTimerHandle);
 	GetWorld()->GetTimerManager().ClearTimer(TrackCrewEvacTimerHandle);
 	GetWorld()->GetTimerManager().ClearTimer(CrewSpawnDelayTimerHandle);
+	GetWorld()->GetTimerManager().ClearTimer(CrewSpawnStepTimerHandle);
 }
 
 
@@ -2446,3 +2477,119 @@ void UT72TankAIComponent::SpawnCrewFromTankDelayed()
 	SpawnCrewFromTank();
 }
 
+
+void UT72TankAIComponent::SpawnNextCrewMember()
+{
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	if (PendingCrewSpawnIndex >= CrewCount)
+	{
+		UpdateAPCCrewAssignment();
+
+		DebugLog(FString::Printf(TEXT("[T72 CREW] Crew spawn finished | Spawned=%d"),
+			SpawnedCrew.Num()));
+
+		return;
+	}
+
+	AInfantryCharacter* CrewMember = SpawnSingleCrewMember(PendingCrewSpawnIndex);
+
+	if (CrewMember)
+	{
+		SpawnedCrew.Add(CrewMember);
+		UpdateAPCCrewAssignment();
+	}
+
+	PendingCrewSpawnIndex++;
+
+	if (PendingCrewSpawnIndex < CrewCount)
+	{
+		GetWorld()->GetTimerManager().ClearTimer(CrewSpawnStepTimerHandle);
+		GetWorld()->GetTimerManager().SetTimer(
+			CrewSpawnStepTimerHandle,
+			this,
+			&UT72TankAIComponent::SpawnNextCrewMember,
+			CrewSpawnIntervalSeconds,
+			false
+		);
+	}
+	else
+	{
+		UpdateAPCCrewAssignment();
+
+		DebugLog(FString::Printf(TEXT("[T72 CREW] Crew spawn finished | Spawned=%d"),
+			SpawnedCrew.Num()));
+	}
+}
+AInfantryCharacter* UT72TankAIComponent::SpawnSingleCrewMember(int32 CrewIndex)
+{
+	if (!GetWorld() || !CrewInfantryClass)
+	{
+		return nullptr;
+	}
+
+	AActor* Owner = GetOwner();
+
+	const FRotator BaseRotation = Owner ? Owner->GetActorRotation() : FRotator::ZeroRotator;
+	const FVector SpawnLocation = GetCrewSpawnLocation(CrewIndex);
+	const FRotator SpawnRotation(0.0f, BaseRotation.Yaw + FMath::RandRange(-35.0f, 35.0f), 0.0f);
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = Owner;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+	AInfantryCharacter* CrewMember = GetWorld()->SpawnActor<AInfantryCharacter>(
+		CrewInfantryClass,
+		SpawnLocation,
+		SpawnRotation,
+		SpawnParams
+	);
+
+	if (!CrewMember)
+	{
+		DebugLog(FString::Printf(TEXT("[T72 CREW] Failed to spawn crew member %d"), CrewIndex));
+		return nullptr;
+	}
+
+	CrewMember->SpawnDefaultController();
+	CrewMember->SetRunning(true);
+	CrewMember->SetAIAnimState(TEXT("ReturnToPost"));
+
+	AInfantryAIController* CrewController = Cast<AInfantryAIController>(CrewMember->GetController());
+
+	if (CrewController)
+	{
+		CrewController->BeginMoveToShelterLocation(GetCrewShelterLocation(CrewIndex));
+	}
+	else
+	{
+		DebugLog(FString::Printf(TEXT("[T72 CREW] Crew member has no InfantryAIController | Pawn=%s"), *GetNameSafe(CrewMember)));
+	}
+
+	DebugLog(FString::Printf(TEXT("[T72 CREW] Spawned crew member %d | Pawn=%s Shelter=%s"),
+		CrewIndex,
+		*GetNameSafe(CrewMember),
+		*GetNameSafe(CrewShelterPoint)));
+
+	return CrewMember;
+}
+
+void UT72TankAIComponent::UpdateAPCCrewAssignment()
+{
+	if (!SpawnedAPC)
+	{
+		return;
+	}
+
+	UAPCAIComponent* APCAI = FindAPCAIComponent(SpawnedAPC);
+
+	if (!APCAI)
+	{
+		return;
+	}
+
+	APCAI->SetEvacuationCrew(SpawnedCrew);
+}

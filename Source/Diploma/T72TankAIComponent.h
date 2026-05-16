@@ -16,6 +16,8 @@ class USkeletalMeshComponent;
 class AInfantryCharacter;
 class UPrimitiveComponent;
 class AFPVDronePawn;
+class AInfantryCharacter;
+class UAPCAIComponent;
 
 
 UENUM(BlueprintType)
@@ -30,7 +32,6 @@ enum class ET72TankAIState : uint8
 	Relocating,
 	Retreating,
 	TrackTurnReaction,
-	TrackFinalShot,
 	TrackCrewEvacWait,
 	Immobilized,
 	EngineCoast,
@@ -152,7 +153,7 @@ public:
 	void NotifyDroneImpactOrNearMiss(FVector ImpactLocation, bool bHitVulnerableZone);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Debug")
-	bool bDebugLogs = true;
+	bool bDebugLogs = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "T72 State")
 	ET72TankAIState CurrentState = ET72TankAIState::Idle;
@@ -357,10 +358,51 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
 	float CrewShelterFormationRadiusCm = 250.0f;
+	UFUNCTION(BlueprintCallable, Category = "T72|Crew")
+	int32 GetTankCrewInsideCount() const;
+
+	UFUNCTION(BlueprintCallable, Category = "T72|Crew")
+	int32 GetSpawnedCrewCount() const;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 Crew")
+	float CrewSpawnIntervalSeconds = 0.18f;
+
+protected:
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72|APC Evacuation")
+	TSubclassOf<AActor> APCClass;
+
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "T72|APC Evacuation")
+	AActor* APCSpawnPoint = nullptr;
+
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "T72|APC Evacuation")
+	AActor* APCEvacPoint = nullptr;
+
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "T72|APC Evacuation")
+	AActor* APCReturnPoint = nullptr;
+
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "T72|APC Evacuation")
+	AActor* APCBoardingMovePoint = nullptr;
 
 private:
 
+	FTimerHandle CrewSpawnStepTimerHandle;
 
+	int32 PendingCrewSpawnIndex = 0;
+
+	void SpawnNextCrewMember();
+	AInfantryCharacter* SpawnSingleCrewMember(int32 CrewIndex);
+	void UpdateAPCCrewAssignment();
+
+	UPROPERTY()
+	AActor* SpawnedAPC = nullptr;
+
+	int32 TankCrewInsideCount = 0;
+
+	bool bAPCSpawned = false;
+
+	void SpawnAPCForCrewEvacuation();
+	UAPCAIComponent* FindAPCAIComponent(AActor* APCActor) const;
 
 	FTimerHandle CrewSpawnDelayTimerHandle;
 
@@ -464,7 +506,6 @@ private:
 
 	ET72DamageZone DamagedTrackZone = ET72DamageZone::None;
 	int32 TrackTurnDirection = 1;
-	bool bTrackFinalShotFired = false;
 
 	float GetEffectiveTurretTurnSpeedDeg() const;
 	void ApplyEngineMobilityFailure();
@@ -472,7 +513,6 @@ private:
 	void StartTrackDamageSequence(ET72DamageZone Zone);
 	void TickTrackTurnReaction(float DeltaTime);
 	void FinishTrackTurnReaction();
-	void TickTrackFinalShot(float DeltaTime);
 	void StartTrackCrewEvacTimer();
 	void FinishTrackCrewEvacTimer();
 
