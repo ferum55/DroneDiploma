@@ -16,6 +16,7 @@
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/UnrealType.h"
+#include "MissionScenarioController.h"
 
 USPGAIComponent::USPGAIComponent()
 {
@@ -483,6 +484,12 @@ void USPGAIComponent::StopMission()
 	SetWheelSpeed(0.0f);
 	SetFiringActive(false);
 	SetState(ESPGAIState::Idle);
+
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifySPGEscaped();
+	}
 }
 
 void USPGAIComponent::SetState(ESPGAIState NewState)
@@ -787,6 +794,11 @@ void USPGAIComponent::TickReturning(float DeltaTime)
 		if (CurrentReturnRouteIndex >= 0)
 		{
 			return;
+		}
+		if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+			UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+		{
+			MissionController->NotifySPGEscaped();
 		}
 
 		SetState(ESPGAIState::Idle);
@@ -1121,6 +1133,11 @@ void USPGAIComponent::DisableGunAndRetreat()
 	}
 
 	bGunDestroyed = true;
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifySPGMinorDamage();
+	}
 	SetFiringActive(false);
 	FireTimer = 0.0f;
 
@@ -1145,6 +1162,11 @@ void USPGAIComponent::StartTrackDamageSequence(ESPGDamageZone Zone)
 
 	bTrackHitWhileMoving = IsMovementState(CurrentState);
 	bMobilityDestroyed = true;
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifySPGImmobilized();
+	}
 	DamagedTrackZone = Zone;
 	TrackTurnDirection = Zone == ESPGDamageZone::LeftTrack ? -1 : 1;
 
@@ -1368,6 +1390,11 @@ void USPGAIComponent::ApplyEngineMobilityFailure()
 	}
 
 	bMobilityDestroyed = true;
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifySPGImmobilized();
+	}
 	bCrewEvacuated = true;
 
 	SetWheelSpeed(0.0f);
@@ -1387,6 +1414,15 @@ void USPGAIComponent::DestroySPG(FVector HitLocation)
 	}
 
 	ClearDamageTimers();
+	const int32 CrewInsideAtDestroy = SPGCrewInsideCount;
+
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifySPGDestroyed(CrewInsideAtDestroy);
+	}
+
+	SPGCrewInsideCount = 0;
 
 	bSPGDestroyed = true;
 	bMobilityDestroyed = true;
@@ -1547,6 +1583,7 @@ AInfantryCharacter* USPGAIComponent::SpawnSingleCrewMember(int32 CrewIndex)
 
 	CrewMember->SpawnDefaultController();
 	CrewMember->SetRunning(true);
+	CrewMember->SetMissionKillGroupId(TEXT("SPGCrew"));
 	CrewMember->SetAIAnimState(TEXT("ReturnToPost"));
 
 	AInfantryAIController* CrewController = Cast<AInfantryAIController>(CrewMember->GetController());

@@ -5,7 +5,8 @@
 #include "TimerManager.h"
 #include "InfantryCharacter.h"
 #include "InfantryAIController.h"
-
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
 #include "Kismet/GameplayStatics.h"
 #include "Particles/ParticleSystem.h"
 #include "Particles/ParticleSystemComponent.h"
@@ -15,6 +16,7 @@
 #include "UObject/ConstructorHelpers.h"
 #include "FPVDronePawn.h"
 #include "APCAIComponent.h"
+#include "MissionScenarioController.h"
 
 UT72TankAIComponent::UT72TankAIComponent()
 {
@@ -33,13 +35,6 @@ UT72TankAIComponent::UT72TankAIComponent()
 	{
 		DestroyedTankMaterial = DamagedMaterialFinder.Object;
 	}
-
-	static ConstructorHelpers::FObjectFinder<UParticleSystem> HatchSmokeFinder(TEXT("/Game/VFX/Realistic_Starter_VFX_Pack_Vol2/Particles/Smoke/P_Smoke_A.P_Smoke_A"));
-	if (HatchSmokeFinder.Succeeded())
-	{
-		HatchSmokeFX = HatchSmokeFinder.Object;
-	}
-
 	static ConstructorHelpers::FObjectFinder<UParticleSystem> SecondaryExplosionFinder(TEXT("/Game/VFX/Realistic_Starter_VFX_Pack_Vol2/Particles/Explosion/P_Explosion_Big_C.P_Explosion_Big_C"));
 	if (SecondaryExplosionFinder.Succeeded())
 	{
@@ -52,16 +47,16 @@ UT72TankAIComponent::UT72TankAIComponent()
 		HatchKillExplosionFX = DestroyedExplosionFinder.Object;
 	}
 
-	static ConstructorHelpers::FObjectFinder<UParticleSystem> EngineFireFinder(TEXT("/Game/VFX/Realistic_Starter_VFX_Pack_Vol2/Particles/Fire/P_Fire_Wall.P_Fire_Wall"));
+	static ConstructorHelpers::FObjectFinder<UParticleSystem> EngineFireFinder(TEXT("/Game/VFX/Realistic_Starter_VFX_Pack_Vol2/Particles/Fire/P_Fire_Big.P_Fire_Big"));
 	if (EngineFireFinder.Succeeded())
 	{
 		EngineFireFX = EngineFireFinder.Object;
 	}
 
-	static ConstructorHelpers::FObjectFinder<UParticleSystem> HatchFireFinder(TEXT("/Game/VFX/Realistic_Starter_VFX_Pack_Vol2/Particles/Fire/P_Fire_Big.P_Fire_Big"));
-	if (HatchFireFinder.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> DestroyedDamageSmokeFinder(TEXT("NiagaraSystem'/Game/VigilanteContent/Vehicles/East_Tank_T72b/FX/NS_East_Tank_T72B_Damaged.NS_East_Tank_T72B_Damaged'"));
+	if (DestroyedDamageSmokeFinder.Succeeded())
 	{
-		HatchKillFireFX = HatchFireFinder.Object;
+		DestroyedDamageSmokeFX = DestroyedDamageSmokeFinder.Object;
 	}
 
 }
@@ -110,11 +105,6 @@ void UT72TankAIComponent::ApplyDefaultAssetReferences()
 		DestroyedTankMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/VigilanteContent/Vehicles/East_Tank_T72b/Damaged/Materials/MI_East_Tank_T72b_Damaged.MI_East_Tank_T72b_Damaged"));
 	}
 
-	if (!HatchSmokeFX)
-	{
-		HatchSmokeFX = LoadObject<UParticleSystem>(nullptr, TEXT("/Game/VFX/Realistic_Starter_VFX_Pack_Vol2/Particles/Smoke/P_Smoke_A.P_Smoke_A"));
-	}
-
 	if (!EngineSecondaryExplosionFX)
 	{
 		EngineSecondaryExplosionFX = LoadObject<UParticleSystem>(nullptr, TEXT("/Game/VFX/Realistic_Starter_VFX_Pack_Vol2/Particles/Explosion/P_Explosion_Big_C.P_Explosion_Big_C"));
@@ -127,23 +117,22 @@ void UT72TankAIComponent::ApplyDefaultAssetReferences()
 
 	if (!EngineFireFX)
 	{
-		EngineFireFX = LoadObject<UParticleSystem>(nullptr, TEXT("/Game/VFX/Realistic_Starter_VFX_Pack_Vol2/Particles/Fire/P_Fire_Wall.P_Fire_Wall"));
+		EngineFireFX = LoadObject<UParticleSystem>(nullptr, TEXT("/Game/VFX/Realistic_Starter_VFX_Pack_Vol2/Particles/Fire/P_Fire_Big.P_Fire_Big"));
 	}
 
-	if (!HatchKillFireFX)
+	if (!DestroyedDamageSmokeFX)
 	{
-		HatchKillFireFX = LoadObject<UParticleSystem>(nullptr, TEXT("/Game/VFX/Realistic_Starter_VFX_Pack_Vol2/Particles/Fire/P_Fire_Big.P_Fire_Big"));
+		DestroyedDamageSmokeFX = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/VigilanteContent/Vehicles/East_Tank_T72b/FX/NS_East_Tank_T72B_Damaged.NS_East_Tank_T72B_Damaged"));
 	}
 
 	DebugLog(FString::Printf(
-		TEXT("[T72 DEFAULTS] Projectile=%s DamagedMaterial=%s HatchSmoke=%s SecondaryExplosion=%s DestroyedExplosion=%s EngineFire=%s HatchFire=%s"),
+		TEXT("[T72 DEFAULTS] Projectile=%s DamagedMaterial=%s SecondaryExplosion=%s DestroyedExplosion=%s EngineFire=%s DamageSmoke=%s"),
 		ProjectileClass ? *ProjectileClass->GetName() : TEXT("NULL"),
 		DestroyedTankMaterial ? *DestroyedTankMaterial->GetName() : TEXT("NULL"),
-		HatchSmokeFX ? *HatchSmokeFX->GetName() : TEXT("NULL"),
 		EngineSecondaryExplosionFX ? *EngineSecondaryExplosionFX->GetName() : TEXT("NULL"),
 		HatchKillExplosionFX ? *HatchKillExplosionFX->GetName() : TEXT("NULL"),
 		EngineFireFX ? *EngineFireFX->GetName() : TEXT("NULL"),
-		HatchKillFireFX ? *HatchKillFireFX->GetName() : TEXT("NULL")
+		DestroyedDamageSmokeFX ? *DestroyedDamageSmokeFX->GetName() : TEXT("NULL")
 	));
 }
 
@@ -420,7 +409,6 @@ void UT72TankAIComponent::ApplyZoneDamage(ET72DamageZone Zone, FVector HitLocati
 	case ET72DamageZone::TurretHatch:
 	case ET72DamageZone::HullHatch:
 		PlayHatchKillExplosion(HitLocation);
-		StartHatchKillFire();
 		DestroyTank();
 		break;
 
@@ -1317,14 +1305,31 @@ void UT72TankAIComponent::DestroyTank()
 
 	ClearDamageTimers();
 
+	const int32 CrewInsideAtDestroy = TankCrewInsideCount;
+
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifyTankDestroyed(CrewInsideAtDestroy);
+	}
+
+	TankCrewInsideCount = 0;
+
 	bTankDestroyed = true;
 	bMobilityDestroyed = true;
 	bGunDestroyed = true;
+
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifyTankGunDestroyed();
+	}
 
 	SetWheelSpeed(0.0f);
 	SetFiringActive(false);
 	SetEngineFireActive(false);
 	ApplyDestroyedMaterial();
+	PlayDestroyedDamageSmoke();
 	OpenHatches();
 	SetState(ET72TankAIState::Destroyed);
 
@@ -1340,6 +1345,11 @@ void UT72TankAIComponent::StartTrackDamageSequence(ET72DamageZone Zone)
 
 	bTrackHitWhileMoving = IsMovementState(CurrentState);
 	bMobilityDestroyed = true;
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifyTankImmobilized();
+	}
 	bFirePatrolInitialized = false;
 	bFirePatrolFirstShotDone = false;
 	DamagedTrackZone = Zone;
@@ -1583,11 +1593,9 @@ void UT72TankAIComponent::ApplyEngineMobilityFailure()
 	bEngineMobilityFailureApplied = true;
 	bMobilityDestroyed = true;
 	bCrewEvacuated = true;
-
 	SetWheelSpeed(0.0f);
 	SetFiringActive(false);
 	OpenHatches();
-	StartHatchSmoke();
 	SetState(ET72TankAIState::Burning);
 	DebugLog(TEXT("[T72 DAMAGE] Engine mobility failed, turret speed reduced, crew evacuation started"));
 }
@@ -1762,71 +1770,64 @@ void UT72TankAIComponent::TriggerEngineHalfBurnEffects()
 	}
 
 	bCrewEvacuated = true;
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifyTankImmobilized();
+		MissionController->NotifyTankCrewEvacuationStarted();
+	}
+
 
 	SetFiringActive(false);
 	OpenHatches();
-	StartHatchSmoke();
 	TriggerCrewEvacuation();
 
 	DebugLog(TEXT("[T72 FX] Engine half-burn effects triggered, crew evacuation started"));
 }
 
-void UT72TankAIComponent::StartHatchSmoke()
-{
-	USceneComponent* CommandPoint = FindSceneComponentByName(CommandHatchSmokePointName);
-	USceneComponent* DriverPoint = FindSceneComponentByName(DriverHatchSmokePointName);
 
-	if (!HatchSmokeFX)
+UNiagaraComponent* UT72TankAIComponent::FindNiagaraComponentByName(FName ComponentName) const
+{
+	AActor* Owner = GetOwner();
+
+	if (!Owner)
 	{
-		DebugLog(TEXT("[T72 FX] HatchSmokeFX is NULL"));
+		return nullptr;
+	}
+
+	TArray<UNiagaraComponent*> Components;
+	Owner->GetComponents<UNiagaraComponent>(Components);
+
+	for (UNiagaraComponent* Component : Components)
+	{
+		if (Component && Component->GetFName() == ComponentName)
+		{
+			return Component;
+		}
+	}
+
+	return nullptr;
+}
+
+void UT72TankAIComponent::PlayDestroyedDamageSmoke()
+{
+	UNiagaraComponent* DamageSmokeComponent = FindNiagaraComponentByName(DamageSmokeComponentName);
+
+	if (!DamageSmokeComponent)
+	{
+		DebugLog(FString::Printf(TEXT("[T72 FX] DamageSmoke Niagara component not found: %s"), *DamageSmokeComponentName.ToString()));
 		return;
 	}
 
-	if (CommandPoint)
+	if (DestroyedDamageSmokeFX)
 	{
-		CommandHatchSmokePSC = UGameplayStatics::SpawnEmitterAttached(
-			HatchSmokeFX,
-			CommandPoint,
-			NAME_None,
-			FVector::ZeroVector,
-			FRotator::ZeroRotator,
-			EAttachLocation::SnapToTarget,
-			false
-		);
-
-		if (CommandHatchSmokePSC)
-		{
-			CommandHatchSmokePSC->SetWorldScale3D(FVector(HatchSmokeScale));
-		}
-	}
-	else
-	{
-		DebugLog(FString::Printf(TEXT("[T72 FX] Command hatch smoke point not found: %s"), *CommandHatchSmokePointName.ToString()));
+		DamageSmokeComponent->SetAsset(DestroyedDamageSmokeFX);
 	}
 
-	if (DriverPoint)
-	{
-		DriverHatchSmokePSC = UGameplayStatics::SpawnEmitterAttached(
-			HatchSmokeFX,
-			DriverPoint,
-			NAME_None,
-			FVector::ZeroVector,
-			FRotator::ZeroRotator,
-			EAttachLocation::SnapToTarget,
-			false
-		);
+	DamageSmokeComponent->SetVisibility(true, true);
+	DamageSmokeComponent->Activate(true);
 
-		if (DriverHatchSmokePSC)
-		{
-			DriverHatchSmokePSC->SetWorldScale3D(FVector(HatchSmokeScale));
-		}
-	}
-	else
-	{
-		DebugLog(FString::Printf(TEXT("[T72 FX] Driver hatch smoke point not found: %s"), *DriverHatchSmokePointName.ToString()));
-	}
-
-	DebugLog(TEXT("[T72 FX] Hatch smoke attached"));
+	DebugLog(TEXT("[T72 FX] Destroyed damage smoke activated"));
 }
 
 void UT72TankAIComponent::PlayHatchKillExplosion(FVector HitLocation)
@@ -1861,6 +1862,15 @@ void UT72TankAIComponent::PlayHatchKillExplosion(FVector HitLocation)
 
 void UT72TankAIComponent::FinalizeEngineBurnoutVisuals()
 {
+	const int32 CrewInsideAtDestroy = TankCrewInsideCount;
+
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifyTankDestroyed(CrewInsideAtDestroy);
+	}
+
+	TankCrewInsideCount = 0;
 	bTankDestroyed = true;
 	bMobilityDestroyed = true;
 	bGunDestroyed = true;
@@ -1868,6 +1878,7 @@ void UT72TankAIComponent::FinalizeEngineBurnoutVisuals()
 	SetWheelSpeed(0.0f);
 	SetFiringActive(false);
 	ApplyDestroyedMaterial();
+	PlayDestroyedDamageSmoke();
 	SetState(ET72TankAIState::Destroyed);
 
 	DebugLog(TEXT("[T72 FX] Destroyed tank visual enabled after engine burnout"));
@@ -1876,6 +1887,11 @@ void UT72TankAIComponent::FinalizeEngineBurnoutVisuals()
 void UT72TankAIComponent::TriggerCrewEvacuation()
 {
 	SetTankNavObstacleActive(true);
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifyTankCrewEvacuationStarted();
+	}
 
 	if (GetWorld() && CrewSpawnDelayAfterNavObstacleSeconds > 0.0f)
 	{
@@ -2123,40 +2139,6 @@ bool UT72TankAIComponent::IsMovementState(ET72TankAIState State) const
 		|| State == ET72TankAIState::FirePositionPatrol
 		|| State == ET72TankAIState::Relocating
 		|| State == ET72TankAIState::Retreating;
-}
-
-void UT72TankAIComponent::StartHatchKillFire()
-{
-	USceneComponent* CommandPoint = FindSceneComponentByName(CommandHatchSmokePointName);
-
-	if (!CommandPoint)
-	{
-		DebugLog(FString::Printf(TEXT("[T72 FX] Hatch kill fire point not found: %s"), *CommandHatchSmokePointName.ToString()));
-		return;
-	}
-
-	if (!HatchKillFireFX)
-	{
-		DebugLog(TEXT("[T72 FX] HatchKillFireFX is NULL"));
-		return;
-	}
-
-	HatchKillFirePSC = UGameplayStatics::SpawnEmitterAttached(
-		HatchKillFireFX,
-		CommandPoint,
-		NAME_None,
-		FVector::ZeroVector,
-		FRotator::ZeroRotator,
-		EAttachLocation::SnapToTarget,
-		false
-	);
-
-	if (HatchKillFirePSC)
-	{
-		HatchKillFirePSC->SetWorldScale3D(FVector(HatchKillFireScale));
-	}
-
-	DebugLog(TEXT("[T72 FX] Hatch kill fire attached"));
 }
 
 void UT72TankAIComponent::ClearDamageTimers()
@@ -2555,6 +2537,7 @@ AInfantryCharacter* UT72TankAIComponent::SpawnSingleCrewMember(int32 CrewIndex)
 	CrewMember->SpawnDefaultController();
 	CrewMember->SetRunning(true);
 	CrewMember->SetAIAnimState(TEXT("ReturnToPost"));
+	CrewMember->SetMissionKillGroupId(TEXT("TankCrew"));
 
 	AInfantryAIController* CrewController = Cast<AInfantryAIController>(CrewMember->GetController());
 

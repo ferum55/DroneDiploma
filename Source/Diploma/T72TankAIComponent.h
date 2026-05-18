@@ -18,6 +18,8 @@ class UPrimitiveComponent;
 class AFPVDronePawn;
 class AInfantryCharacter;
 class UAPCAIComponent;
+class UNiagaraSystem;
+class UNiagaraComponent;
 
 
 UENUM(BlueprintType)
@@ -233,11 +235,6 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "T72 Damage")
 	bool bCrewEvacuated = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 FX")
-	UParticleSystem* HatchKillFireFX = nullptr;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 FX")
-	float HatchKillFireScale = 1.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 FX")
 	FName EngineFXPointName = TEXT("EngineFXPoint");
@@ -258,7 +255,13 @@ public:
 	UParticleSystem* EngineFireFX = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 FX")
-	UParticleSystem* HatchSmokeFX = nullptr;
+	float EngineFireScale = 0.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 FX")
+	FName DamageSmokeComponentName = TEXT("DamageSmoke");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 FX")
+	UNiagaraSystem* DestroyedDamageSmokeFX = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 FX")
 	UParticleSystem* HatchKillExplosionFX = nullptr;
@@ -268,12 +271,6 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 FX")
 	float EngineSecondaryExplosionScale = 3.f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 FX")
-	float EngineFireScale = 1.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 FX")
-	float HatchSmokeScale = 1.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "T72 FX")
 	float HatchKillExplosionScale = 10.f;
@@ -535,12 +532,13 @@ private:
 	void PlayEngineSecondaryExplosion();
 	void StartEngineFire();
 	void TriggerEngineHalfBurnEffects();
-	void StartHatchSmoke();
+
+	UNiagaraComponent* FindNiagaraComponentByName(FName ComponentName) const;
+	void PlayDestroyedDamageSmoke();
+
 	void PlayHatchKillExplosion(FVector HitLocation);
 	void FinalizeEngineBurnoutVisuals();
 	void TriggerCrewEvacuation();
-	void StartHatchKillFire();
-
 	UFUNCTION()
 	void OnDamageZoneBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 };

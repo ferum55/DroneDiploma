@@ -4,7 +4,8 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "Components/SkeletalMeshComponent.h"
-
+#include "MissionScenarioController.h"
+#include "Kismet/GameplayStatics.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "TimerManager.h"
 
@@ -49,6 +50,11 @@ void AInfantryCharacter::BeginPlay()
     }
 
     SetRunning(false);
+}
+
+void AInfantryCharacter::SetMissionKillGroupId(FName NewMissionKillGroupId)
+{
+    MissionKillGroupId = NewMissionKillGroupId;
 }
 
 float AInfantryCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
@@ -219,6 +225,11 @@ void AInfantryCharacter::Die(FVector ExplosionOrigin, bool bApplyExplosionImpuls
     }
 
     bDead = true;
+    if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+        UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+    {
+        MissionController->NotifyInfantryKilled(MissionKillGroupId, 1);
+    }
 
     GetCharacterMovement()->DisableMovement();
     GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);

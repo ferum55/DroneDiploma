@@ -4,7 +4,7 @@
 #include "FPVMotorComponent.h"
 #include "FPVFlightControllerComponent.h"
 #include "ManualRadialDamage.h"
-
+#include "MissionScenarioController.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Camera/CameraComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -488,6 +488,12 @@ void AFPVDronePawn::HandleCrash(const FVector& HitLocation)
     CrashLocation = HitLocation;
     bKillCamExplosionPending = bBombArmedState;
     bKillCamExplosionSpawned = false;
+
+    if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+        UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+    {
+        MissionController->NotifyDroneUsed();
+    }
 
     UE_LOG(LogTemp, Warning, TEXT("[DRONE CRASH] Crash handled | Location=%s Speed=%.1fkmh Bomb=%d ExplosionPending=%d"),
         *HitLocation.ToString(),

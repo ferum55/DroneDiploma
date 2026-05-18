@@ -377,7 +377,7 @@ public:
 	float APCSpawnDelaySeconds = 20.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SPG|Debug")
-	bool bDebugLogs = true;
+	bool bDebugLogs = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SPG|Debug")
 	bool bMovementDebugLogs = false;

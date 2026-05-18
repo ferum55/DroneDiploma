@@ -18,6 +18,7 @@
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/UnrealType.h"
+#include "MissionScenarioController.h"
 
 
 UAPCAIComponent::UAPCAIComponent()
@@ -207,6 +208,11 @@ void UAPCAIComponent::DestroyAPC(const FVector& HitLocation)
 	}
 
 	bDestroyed = true;
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifyAPCDestroyed(LoadedCrewCount);
+	}
 
 	if (GetWorld())
 	{

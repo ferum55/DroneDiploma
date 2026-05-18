@@ -2,6 +2,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Particles/ParticleSystem.h"
+#include "MissionScenarioController.h"
 
 AMissionObjectiveActor::AMissionObjectiveActor()
 {
@@ -89,6 +90,11 @@ void AMissionObjectiveActor::DestroyObjective()
 	}
 
 	BP_OnObjectiveDestroyed();
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifyMissionObjectiveDestroyed(ObjectiveId, bPrimaryObjective, ScoreValue, this);
+	}
 
 	if (bDisableCollisionOnDestroyed)
 	{

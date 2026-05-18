@@ -4,6 +4,9 @@
 #include "GameFramework/Character.h"
 #include "InfantryCharacter.generated.h"
 
+
+class AMissionScenarioController;
+
 UCLASS()
 class DIPLOMA_API AInfantryCharacter : public ACharacter
 {
@@ -11,6 +14,9 @@ class DIPLOMA_API AInfantryCharacter : public ACharacter
 
 public:
     AInfantryCharacter();
+
+    UFUNCTION(BlueprintCallable, Category = "Infantry|Mission")
+    void SetMissionKillGroupId(FName NewMissionKillGroupId);
 
     UFUNCTION(BlueprintCallable)
     void SetAIAnimState(FName NewAIState);
@@ -66,6 +72,9 @@ public:
 
 
 protected:
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Infantry|Mission")
+    FName MissionKillGroupId = TEXT("EnemyInfantry");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Infantry|Animation")
     float FireAnimHoldSeconds = 0.22f;
