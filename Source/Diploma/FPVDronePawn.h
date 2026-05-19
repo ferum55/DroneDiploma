@@ -5,6 +5,7 @@
 #include "Engine/EngineTypes.h"
 #include "DroneTelemetry.h"
 #include "FPVFlightTypes.h"
+#include "FPVControllerSettingsTypes.h"
 #include "FPVDronePawn.generated.h"
 
 class UCameraComponent;
@@ -55,6 +56,9 @@ public:
     float GetBatteryTotalCurrentA() const;
 
     void UpdateTelemetry();
+    void ApplyControllerSettings(const FFPVControllerSettings& NewSettings, bool bApplyInputMappings);
+    const FFPVControllerSettings& GetControllerSettings() const { return ControllerSettings; }
+    void LoadSavedControllerSettings();
     UFUNCTION(BlueprintCallable, Category = "FPV")
     void ForceCrashAtLocation(const FVector& HitLocation);
 
@@ -110,6 +114,9 @@ private:
 
     UPROPERTY()
     UMaterialInstanceDynamic* FPVPostProcessMID = nullptr;
+
+    UPROPERTY(EditAnywhere, Category = "FPV|Controller")
+    FFPVControllerSettings ControllerSettings;
 
     bool bArmedState = false;
     bool bBombArmedState = false;
@@ -182,7 +189,7 @@ private:
     UPROPERTY(EditAnywhere, Category = "FPV|Physics")
     float RotorVerticalCd = 1.2f;
 
- 
+
 
     FFPVDebugState DebugState;
     float DebugLogTimer = 0.f;
@@ -199,6 +206,11 @@ private:
 
     float NormalizeThrottle(float Raw) const;
     float NormalizeCenteredAxis(float Raw) const;
+    float ApplyCenteredInputCurve(float Value, float DeadZone, float Expo) const;
+    float ApplyThrottleInputCurve(float Value, float DeadZone, float Expo) const;
+    bool IsAllowedKeyboardActionKey(const FKey& Key) const;
+    void ApplyKeyboardActionMapping(const FName& ActionName, const FKey& Key);
+    void RebuildInputMappings();
 
     void UpdateBaseTelemetry();
     float GetRadioAltitudeMeters(bool& bValid) const;
@@ -261,4 +273,4 @@ private:
 
     void ApplyFlightModeFromSwitches();
     void SetFlightModeDirect(EFPVFlightMode NewMode);
-    };
+};

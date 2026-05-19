@@ -1,4 +1,4 @@
-#include "MissionScenarioController.h"
+﻿#include "MissionScenarioController.h"
 #include "Engine/World.h"
 
 AMissionScenarioController::AMissionScenarioController()
@@ -412,22 +412,22 @@ void AMissionScenarioController::ConfigureDefaultFlags()
 
 	if (MissionType == EMissionScenarioType::MortarPosition)
 	{
-		AddFlag(TEXT("Primary_DestroyMortar"), TEXT("Destroy Mortar"), true);
-		AddFlag(TEXT("Bonus_DestroyAmmo"), TEXT("Destroy Ammo"), false);
-		AddFlag(TEXT("Bonus_DestroyInfantry"), TEXT("Kill Infantry"), false);
+		AddFlag(TEXT("Primary_DestroyMortar"), TEXT("Знищити мінометну позицію"), true);
+		AddFlag(TEXT("Bonus_DestroyAmmo"), TEXT("Знищити боєкомплект"), false);
+		AddFlag(TEXT("Bonus_DestroyInfantry"), TEXT("Знищити піхоту на позиції"), false);
 	}
 	else if (MissionType == EMissionScenarioType::SPGStrike)
 	{
-		AddFlag(TEXT("Primary_DestroySPG"), TEXT("Destroy SPG"), true);
-		AddFlag(TEXT("Bonus_DestroySPGCrew"), TEXT("Destroy SPG Crew"), false);
-		AddFlag(TEXT("Bonus_DestroyAPC"), TEXT("Destroy APC"), false);
+		AddFlag(TEXT("Primary_DestroySPG"), TEXT("Знищити САУ"), true);
+		AddFlag(TEXT("Bonus_DestroySPGCrew"), TEXT("Знищити екіпаж"), false);
+		AddFlag(TEXT("Bonus_DestroyAPC"), TEXT("Знищити евакуаційну машину"), false);
 	}
 	else if (MissionType == EMissionScenarioType::TankAttack)
 	{
-		AddFlag(TEXT("Primary_DefendFriendlyPosition"), TEXT("Defend Friendly Position"), true);
-		AddFlag(TEXT("Bonus_DestroyTank"), TEXT("Destroy Tank"), false);
-		AddFlag(TEXT("Bonus_DestroyTankCrew"), TEXT("Kill Tank Crew"), false);
-		AddFlag(TEXT("Bonus_DestroyAPC"), TEXT("Destroy APC"), false);
+		AddFlag(TEXT("Primary_DefendFriendlyPosition"), TEXT("Не допустити знищення позиції"), true);
+		AddFlag(TEXT("Bonus_DestroyTank"), TEXT("Знищити танк Т-72Б3"), false);
+		AddFlag(TEXT("Bonus_DestroyTankCrew"), TEXT("Знищити екіпаж"), false);
+		AddFlag(TEXT("Bonus_DestroyAPC"), TEXT("Знищити евакуаційну машину"), false);
 	}
 }
 
@@ -693,4 +693,34 @@ void AMissionScenarioController::DebugAPCDestroyed()
 void AMissionScenarioController::DebugFriendlyPositionDestroyed()
 {
 	NotifyFriendlyPositionDestroyed();
+}
+
+int32 AMissionScenarioController::GetAvailableDroneCount() const
+{
+	return AvailableDroneCount;
+}
+
+EMissionScenarioType AMissionScenarioController::GetMissionType() const
+{
+	return MissionType;
+}
+
+FText AMissionScenarioController::GetMissionTitle() const
+{
+	if (MissionType == EMissionScenarioType::MortarPosition)
+	{
+		return FText::FromString(TEXT("ЗНИЩЕННЯ МІНОМЕТНОЇ ПОЗИЦІЇ"));
+	}
+
+	if (MissionType == EMissionScenarioType::SPGStrike)
+	{
+		return FText::FromString(TEXT("ЗНИЩЕННЯ САУ"));
+	}
+
+	if (MissionType == EMissionScenarioType::TankAttack)
+	{
+		return FText::FromString(TEXT("ЗАХИСТ ДРУЖНЬОЇ ПОЗИЦІЇ ВІД ТАНКА"));
+	}
+
+	return FText::FromString(TEXT("РЕЗУЛЬТАТИ МІСІЇ"));
 }

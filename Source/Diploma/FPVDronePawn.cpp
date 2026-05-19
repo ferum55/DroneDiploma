@@ -3,6 +3,7 @@
 #include "FPVBatteryComponent.h"
 #include "FPVMotorComponent.h"
 #include "FPVFlightControllerComponent.h"
+#include "FPVControllerSettingsSaveGame.h"
 #include "ManualRadialDamage.h"
 #include "MissionScenarioController.h"
 #include "UObject/ConstructorHelpers.h"
@@ -19,6 +20,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/DamageType.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/InputSettings.h"
+#include "GameFramework/PlayerInput.h"
 
 
 AFPVDronePawn::AFPVDronePawn()
@@ -82,8 +85,9 @@ AFPVDronePawn::AFPVDronePawn()
     SignalComponent = CreateDefaultSubobject<UDroneSignalComponent>(TEXT("SignalComponent"));
     MotorComponent = CreateDefaultSubobject<UFPVMotorComponent>(TEXT("MotorComponent"));
     FlightControllerComponent = CreateDefaultSubobject<UFPVFlightControllerComponent>(TEXT("FlightControllerComponent"));
-    
-    
+
+    ControllerSettings = FFPVControllerSettings::MakeDefault();
+
     Throttle = 0.f;
     PitchInput = 0.f;
     RollInput = 0.f;
@@ -152,6 +156,8 @@ void AFPVDronePawn::BeginPlay()
             FPVPostProcessMID ? TEXT("YES") : TEXT("NO")
         );
     }
+
+    LoadSavedControllerSettings();
 
     if (FlightControllerComponent)
     {
@@ -249,7 +255,7 @@ void AFPVDronePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
     PlayerInputComponent->BindAction("BombArm", IE_Pressed, this, &AFPVDronePawn::ToggleBombArm);
     PlayerInputComponent->BindAction("CycleFlightMode", IE_Pressed, this, &AFPVDronePawn::CycleFlightMode);
 
-        PlayerInputComponent->BindAxis("ArmSwitch", this, &AFPVDronePawn::ArmSwitchAxis);
+    PlayerInputComponent->BindAxis("ArmSwitch", this, &AFPVDronePawn::ArmSwitchAxis);
     PlayerInputComponent->BindAxis("BombArmSwitch", this, &AFPVDronePawn::BombArmSwitchAxis);
     PlayerInputComponent->BindAxis("FlightModeSwitch", this, &AFPVDronePawn::FlightModeSwitchAxis);
     PlayerInputComponent->BindAxis("AcroTrainerSwitch", this, &AFPVDronePawn::AcroTrainerSwitchAxis);
@@ -336,25 +342,22 @@ void AFPVDronePawn::ToggleBombArm()
 
 void AFPVDronePawn::PitchInputAxis(float Value)
 {
-    PitchInput = NormalizeCenteredAxis(Value); //NormalizeCenteredAxis(Value, 0.654f);
+    PitchInput = ApplyCenteredInputCurve(NormalizeCenteredAxis(Value), ControllerSettings.Pitch.DeadZone, ControllerSettings.Pitch.Expo);
 }
 
 void AFPVDronePawn::RollInputAxis(float Value)
 {
-    RollInput = NormalizeCenteredAxis(Value); //NormalizeCenteredAxis(Value, 0.654f);
+    RollInput = ApplyCenteredInputCurve(NormalizeCenteredAxis(Value), ControllerSettings.Roll.DeadZone, ControllerSettings.Roll.Expo);
 }
 
 void AFPVDronePawn::YawInputAxis(float Value)
 {
-    YawInput = NormalizeCenteredAxis(Value);//NormalizeCenteredAxis(Value, 0.665f);
+    YawInput = ApplyCenteredInputCurve(NormalizeCenteredAxis(Value), ControllerSettings.Yaw.DeadZone, ControllerSettings.Yaw.Expo);
 }
 
 void AFPVDronePawn::ThrottleInput(float Value)
 {
-    //UE_LOG(LogTemp, Warning, TEXT("Throttle axis value: %.3f"), Value);
-
-    Throttle = NormalizeThrottle(Value);
-    /*UE_LOG(LogTemp, Warning, TEXT("Throttle state: %.3f"), Throttle);*/
+    Throttle = ApplyThrottleInputCurve(NormalizeThrottle(Value), ControllerSettings.ThrottleDeadZone, ControllerSettings.ThrottleExpo);
 }
 
 void AFPVDronePawn::UpdateBaseTelemetry()
@@ -442,20 +445,148 @@ float AFPVDronePawn::NormalizeThrottle(float Raw) const
 {
     const float Min = 0.15f;
     const float Max = 0.85f;
-    float Value = (Raw - Min) / (Max - Min);
-    Value = FMath::Clamp(Value, 0.f, 1.f);
-    if (Value < 0.02f) Value = 0.f;
-    return Value;
+    const float Value = (Raw - Min) / (Max - Min);
+    return FMath::Clamp(Value, 0.f, 1.f);
 }
 
 float AFPVDronePawn::NormalizeCenteredAxis(float Raw) const
 {
+    const float Value = (Raw - 0.5f) * 2.0f;
+    return FMath::Clamp(Value, -1.f, 1.f);
+}
 
-    float Value = (Raw - 0.5f) * 2.0f;
-    Value = FMath::Clamp(Value, -1.f, 1.f);
-    const float DeadZone = 0.04f;
-    if (FMath::Abs(Value) < DeadZone) Value = 0.f;
-    return Value;
+float AFPVDronePawn::ApplyCenteredInputCurve(float Value, float DeadZone, float Expo) const
+{
+    const float ClampedDeadZone = FMath::Clamp(DeadZone, 0.0f, 0.95f);
+    const float ClampedExpo = FMath::Clamp(Expo, 1.0f, 3.0f);
+    const float ClampedValue = FMath::Clamp(Value, -1.0f, 1.0f);
+    const float AbsValue = FMath::Abs(ClampedValue);
+
+    if (AbsValue <= ClampedDeadZone)
+    {
+        return 0.0f;
+    }
+
+    return FMath::Sign(ClampedValue) * FMath::Pow(AbsValue, ClampedExpo);
+}
+
+float AFPVDronePawn::ApplyThrottleInputCurve(float Value, float DeadZone, float Expo) const
+{
+    const float ClampedDeadZone = FMath::Clamp(DeadZone, 0.0f, 0.95f);
+    const float ClampedExpo = FMath::Clamp(Expo, 1.0f, 3.0f);
+    const float ClampedValue = FMath::Clamp(Value, 0.0f, 1.0f);
+
+    if (ClampedValue <= ClampedDeadZone)
+    {
+        return 0.0f;
+    }
+
+    return FMath::Pow(ClampedValue, ClampedExpo);
+}
+
+void AFPVDronePawn::LoadSavedControllerSettings()
+{
+    FFPVControllerSettings LoadedSettings = FFPVControllerSettings::MakeDefault();
+
+    if (UGameplayStatics::DoesSaveGameExist(TEXT("FPVControllerSettings"), 0))
+    {
+        if (UFPVControllerSettingsSaveGame* Save = Cast<UFPVControllerSettingsSaveGame>(UGameplayStatics::LoadGameFromSlot(TEXT("FPVControllerSettings"), 0)))
+        {
+            LoadedSettings = Save->Settings;
+        }
+    }
+
+    ApplyControllerSettings(LoadedSettings, true);
+}
+
+void AFPVDronePawn::ApplyControllerSettings(const FFPVControllerSettings& NewSettings, bool bApplyInputMappings)
+{
+    ControllerSettings = NewSettings;
+    ControllerSettings.Clamp();
+
+    if (FlightControllerComponent)
+    {
+        FlightControllerComponent->ApplyControllerSettings(ControllerSettings);
+    }
+
+    if (bApplyInputMappings)
+    {
+        ApplyKeyboardActionMapping(TEXT("Arm"), ControllerSettings.ArmKey);
+        ApplyKeyboardActionMapping(TEXT("BombArm"), ControllerSettings.BombArmKey);
+        ApplyKeyboardActionMapping(TEXT("CycleFlightMode"), ControllerSettings.CycleFlightModeKey);
+        RebuildInputMappings();
+    }
+}
+
+bool AFPVDronePawn::IsAllowedKeyboardActionKey(const FKey& Key) const
+{
+    if (!Key.IsValid())
+    {
+        return false;
+    }
+
+    if (Key == EKeys::AnyKey)
+    {
+        return false;
+    }
+
+    if (Key.IsGamepadKey() || Key.IsMouseButton())
+    {
+        return false;
+    }
+
+    return true;
+}
+
+void AFPVDronePawn::ApplyKeyboardActionMapping(const FName& ActionName, const FKey& Key)
+{
+    if (!IsAllowedKeyboardActionKey(Key))
+    {
+        return;
+    }
+
+    UInputSettings* InputSettings = UInputSettings::GetInputSettings();
+    if (!InputSettings)
+    {
+        return;
+    }
+
+    TArray<FInputActionKeyMapping> ExistingMappings;
+    InputSettings->GetActionMappingByName(ActionName, ExistingMappings);
+
+    for (const FInputActionKeyMapping& Mapping : ExistingMappings)
+    {
+        if (!Mapping.Key.IsGamepadKey())
+        {
+            InputSettings->RemoveActionMapping(Mapping, false);
+        }
+    }
+
+    InputSettings->AddActionMapping(FInputActionKeyMapping(ActionName, Key), false);
+}
+
+void AFPVDronePawn::RebuildInputMappings()
+{
+    if (UInputSettings* InputSettings = UInputSettings::GetInputSettings())
+    {
+        InputSettings->SaveKeyMappings();
+    }
+
+    if (!GetWorld())
+    {
+        return;
+    }
+
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        if (APlayerController* PC = It->Get())
+        {
+            if (PC->PlayerInput)
+            {
+                PC->PlayerInput->ForceRebuildingKeyMaps(true);
+            }
+        }
+    }
 }
 
 void AFPVDronePawn::UpdateSignalTelemetry(float DeltaTime)
@@ -1048,8 +1179,8 @@ void AFPVDronePawn::UpdateTelemetry()
     UpdateBaseTelemetry();
 
     Telemetry.FlightMode = GetFlightModeText();
-    
-    
+
+
 
     if (BatteryComponent)
     {

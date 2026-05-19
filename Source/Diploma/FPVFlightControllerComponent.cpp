@@ -57,6 +57,34 @@ void UFPVFlightControllerComponent::SetFlightMode(EFPVFlightMode NewMode)
 	UE_LOG(LogTemp, Warning, TEXT("FlightMode: %s"), *GetFlightModeText());
 }
 
+
+void UFPVFlightControllerComponent::ApplyControllerSettings(const FFPVControllerSettings& Settings)
+{
+	FFPVControllerSettings ClampedSettings = Settings;
+	ClampedSettings.Clamp();
+
+	PitchPID.P = ClampedSettings.Pitch.P;
+	PitchPID.I = ClampedSettings.Pitch.I;
+	PitchPID.D = ClampedSettings.Pitch.D;
+	PitchPID.IntegralClamp = 0.3f;
+
+	RollPID.P = ClampedSettings.Roll.P;
+	RollPID.I = ClampedSettings.Roll.I;
+	RollPID.D = ClampedSettings.Roll.D;
+	RollPID.IntegralClamp = 0.3f;
+
+	YawPID.P = ClampedSettings.Yaw.P;
+	YawPID.I = ClampedSettings.Yaw.I;
+	YawPID.D = ClampedSettings.Yaw.D;
+	YawPID.IntegralClamp = 0.3f;
+
+	MaxPitchRate = ClampedSettings.Pitch.MaxRateDegPerSec;
+	MaxRollRate = ClampedSettings.Roll.MaxRateDegPerSec;
+	MaxYawRate = ClampedSettings.Yaw.MaxRateDegPerSec;
+
+	ResetController();
+}
+
 FString UFPVFlightControllerComponent::GetFlightModeText() const
 {
 	switch (FlightMode)

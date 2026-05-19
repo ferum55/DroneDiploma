@@ -130,6 +130,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Mission")
 	const TArray<FMissionFlagState>& GetMissionFlags() const;
 
+	UFUNCTION(BlueprintCallable, Category = "Mission")
+	int32 GetAvailableDroneCount() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Mission")
+	EMissionScenarioType GetMissionType() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Mission")
+	FText GetMissionTitle() const;
+
 	UFUNCTION(CallInEditor, Category = "Mission|Debug")
 	void DebugStartMission();
 
