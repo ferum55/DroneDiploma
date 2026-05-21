@@ -620,11 +620,7 @@ void AFPVDronePawn::HandleCrash(const FVector& HitLocation)
     bKillCamExplosionPending = bBombArmedState;
     bKillCamExplosionSpawned = false;
 
-    if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
-        UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
-    {
-        MissionController->NotifyDroneUsed();
-    }
+    ReportDroneUsedToMission();
 
     UE_LOG(LogTemp, Warning, TEXT("[DRONE CRASH] Crash handled | Location=%s Speed=%.1fkmh Bomb=%d ExplosionPending=%d"),
         *HitLocation.ToString(),
@@ -635,12 +631,30 @@ void AFPVDronePawn::HandleCrash(const FVector& HitLocation)
     StartKillCam(HitLocation);
 }
 
+void AFPVDronePawn::ReportDroneUsedToMission()
+{
+    if (bMissionDroneUseReported)
+    {
+        return;
+    }
+
+    bMissionDroneUseReported = true;
+
+    if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+        UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+    {
+        MissionController->NotifyDroneUsed();
+    }
+}
+
 void AFPVDronePawn::ForceCrashAtLocation(const FVector& HitLocation)
 {
     if (bCrashed)
     {
         return;
     }
+
+    ReportDroneUsedToMission();
 
     UE_LOG(LogTemp, Warning, TEXT("[DRONE FORCE CRASH] Location=%s Bomb=%d"),
         *HitLocation.ToString(),
@@ -653,7 +667,6 @@ void AFPVDronePawn::ForceCrashAtLocation(const FVector& HitLocation)
 
     HandleCrash(HitLocation);
 }
-
 void AFPVDronePawn::SpawnCrashExplosion(const FVector& HitLocation)
 {
     if (!ExplosionEffect || !GetWorld())
@@ -818,6 +831,7 @@ void AFPVDronePawn::EndKillCam()
     LastSpawnWorldTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
 
     bCrashed = false;
+    bMissionDroneUseReported = false;
 
     ResetDroneStateAfterRespawn();
 }

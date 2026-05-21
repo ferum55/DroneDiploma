@@ -198,7 +198,7 @@ protected:
 	float MovementDebugInterval = 0.25f;
 
 private:
-
+	void OrderRemainingCrewToEscapeOnFoot();
 	float MovementDebugTimer = 0.0f;
 	UPROPERTY()
 	USkeletalMeshComponent* MeshComponent = nullptr;
@@ -281,6 +281,10 @@ private:
 
 	bool bDestroyed = false;
 	bool bNavObstacleActive = false;
+
+	bool bEscapeReported = false;
+	void NotifyAPCEscapedAtHome();
+
 	void TryBoardOverlappingCrew();
 	bool IsAssignedCrewMember(AActor* Actor) const;
 	FVector GetBoardingMoveLocation() const;

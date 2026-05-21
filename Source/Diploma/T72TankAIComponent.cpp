@@ -380,6 +380,11 @@ void UT72TankAIComponent::OnDamageZoneBeginOverlap(UPrimitiveComponent* Overlapp
 	FVector HitLocation = OverlappedComponent->GetComponentLocation();
 	const bool bValidDirectHit = IsValidDirectWarheadHit(OverlappedComponent, OtherActor, OtherComp, HitLocation);
 
+	if (bWarheadContact)
+	{
+		CrashDroneOnVulnerableZoneContact(OtherActor, OverlappedComponent, OtherComp);
+	}
+
 	if (bValidDirectHit)
 	{
 		DebugLog(FString::Printf(TEXT("[T72 DAMAGE] Valid direct warhead hit: %s Location=%s"), *UEnum::GetValueAsString(Zone), *HitLocation.ToString()));
@@ -388,11 +393,6 @@ void UT72TankAIComponent::OnDamageZoneBeginOverlap(UPrimitiveComponent* Overlapp
 	else
 	{
 		DebugLog(FString::Printf(TEXT("[T72 DAMAGE] Vulnerable zone touched but rejected: %s OtherComp=%s"), *UEnum::GetValueAsString(Zone), OtherComp ? *OtherComp->GetName() : TEXT("NULL")));
-	}
-
-	if (bWarheadContact)
-	{
-		CrashDroneOnVulnerableZoneContact(OtherActor, OverlappedComponent, OtherComp);
 	}
 }
 void UT72TankAIComponent::ApplyZoneDamage(ET72DamageZone Zone, FVector HitLocation)
@@ -597,11 +597,8 @@ void UT72TankAIComponent::TickState(float DeltaTime)
 		break;
 
 	case ET72TankAIState::Burning:
-		if (!bGunDestroyed)
-		{
-			TickAiming(DeltaTime);
-			TickFiring(DeltaTime);
-		}
+		SetWheelSpeed(0.0f);
+		SetFiringActive(false);
 		break;
 
 	case ET72TankAIState::Destroyed:
@@ -1513,23 +1510,34 @@ void UT72TankAIComponent::StartEngineBurning()
 
 	bEngineDestroyed = true;
 	bEngineMobilityFailureApplied = false;
-	bEngineFinalShotFired = false;
+
+	StartEngineFire();
+
+	if (bMobilityDestroyed)
+	{
+		SetWheelSpeed(0.0f);
+		SetFiringActive(false);
+		OpenHatches();
+		TriggerCrewEvacuation();
+		SetState(ET72TankAIState::Burning);
+		return;
+	}
 
 	SetState(ET72TankAIState::EngineCoast);
 
 	if (GetWorld())
 	{
-		GetWorld()->GetTimerManager().ClearTimer(EngineSecondaryExplosionTimerHandle);
-		GetWorld()->GetTimerManager().ClearTimer(EngineMobilityFailureTimerHandle);
-		GetWorld()->GetTimerManager().ClearTimer(EngineHalfBurnTimerHandle);
-		GetWorld()->GetTimerManager().ClearTimer(EngineBurnoutTimerHandle);
 
-		GetWorld()->GetTimerManager().SetTimer(EngineSecondaryExplosionTimerHandle, this, &UT72TankAIComponent::PlayEngineSecondaryExplosion, EngineSecondaryExplosionDelay, false);
-		GetWorld()->GetTimerManager().SetTimer(EngineMobilityFailureTimerHandle, this, &UT72TankAIComponent::ApplyEngineMobilityFailure, EngineMobilityFailureDelay, false);
-		GetWorld()->GetTimerManager().SetTimer(EngineBurnoutTimerHandle, this, &UT72TankAIComponent::FinishEngineBurnout, EngineBurnoutTime, false);
+		GetWorld()->GetTimerManager().SetTimer(
+			EngineMobilityFailureTimerHandle,
+			this,
+			&UT72TankAIComponent::ApplyEngineMobilityFailure,
+			EngineMobilityFailureDelay,
+			false
+		);
 	}
 
-	DebugLog(TEXT("[T72 DAMAGE] Engine hit, coast sequence started"));
+	DebugLog(TEXT("[T72 DAMAGE] Engine hit, fire started, coast started"));
 }
 
 void UT72TankAIComponent::TickEngineCoast(float DeltaTime)
@@ -1593,24 +1601,22 @@ void UT72TankAIComponent::ApplyEngineMobilityFailure()
 	bEngineMobilityFailureApplied = true;
 	bMobilityDestroyed = true;
 	bCrewEvacuated = true;
+
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifyTankImmobilized();
+	}
+
 	SetWheelSpeed(0.0f);
 	SetFiringActive(false);
 	OpenHatches();
+	TriggerCrewEvacuation();
 	SetState(ET72TankAIState::Burning);
-	DebugLog(TEXT("[T72 DAMAGE] Engine mobility failed, turret speed reduced, crew evacuation started"));
+
+	DebugLog(TEXT("[T72 DAMAGE] Engine mobility failed, crew evacuation started"));
 }
 
-void UT72TankAIComponent::FinishEngineBurnout()
-{
-	if (bTankDestroyed)
-	{
-		return;
-	}
-
-	FinalizeEngineBurnoutVisuals();
-
-	DebugLog(TEXT("[T72 DAMAGE] Engine burnout finished"));
-}
 
 void UT72TankAIComponent::DisableGunAndRetreat()
 {
@@ -1688,37 +1694,6 @@ FVector UT72TankAIComponent::GetFXLocation(FName PointName, FVector FallbackLoca
 	return FallbackLocation;
 }
 
-void UT72TankAIComponent::PlayEngineSecondaryExplosion()
-{
-	AActor* Owner = GetOwner();
-
-	if (!Owner || bTankDestroyed)
-	{
-		return;
-	}
-
-	const FVector Location = GetFXLocation(EngineFXPointName, Owner->GetActorLocation());
-
-	if (EngineSecondaryExplosionFX)
-	{
-		UGameplayStatics::SpawnEmitterAtLocation(
-			GetWorld(),
-			EngineSecondaryExplosionFX,
-			Location,
-			FRotator::ZeroRotator,
-			FVector(EngineSecondaryExplosionScale),
-			true
-		);
-
-		DebugLog(TEXT("[T72 FX] Engine secondary explosion spawned"));
-	}
-	else
-	{
-		DebugLog(TEXT("[T72 FX] EngineSecondaryExplosionFX is NULL"));
-	}
-
-	StartEngineFire();
-}
 
 void UT72TankAIComponent::StartEngineFire()
 {
@@ -1760,29 +1735,6 @@ void UT72TankAIComponent::StartEngineFire()
 	{
 		DebugLog(TEXT("[T72 FX] EngineFireFX is NULL"));
 	}
-}
-
-void UT72TankAIComponent::TriggerEngineHalfBurnEffects()
-{
-	if (bTankDestroyed)
-	{
-		return;
-	}
-
-	bCrewEvacuated = true;
-	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
-		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
-	{
-		MissionController->NotifyTankImmobilized();
-		MissionController->NotifyTankCrewEvacuationStarted();
-	}
-
-
-	SetFiringActive(false);
-	OpenHatches();
-	TriggerCrewEvacuation();
-
-	DebugLog(TEXT("[T72 FX] Engine half-burn effects triggered, crew evacuation started"));
 }
 
 
@@ -1858,30 +1810,6 @@ void UT72TankAIComponent::PlayHatchKillExplosion(FVector HitLocation)
 	{
 		DebugLog(TEXT("[T72 FX] HatchKillExplosionFX is NULL"));
 	}
-}
-
-void UT72TankAIComponent::FinalizeEngineBurnoutVisuals()
-{
-	const int32 CrewInsideAtDestroy = TankCrewInsideCount;
-
-	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
-		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
-	{
-		MissionController->NotifyTankDestroyed(CrewInsideAtDestroy);
-	}
-
-	TankCrewInsideCount = 0;
-	bTankDestroyed = true;
-	bMobilityDestroyed = true;
-	bGunDestroyed = true;
-
-	SetWheelSpeed(0.0f);
-	SetFiringActive(false);
-	ApplyDestroyedMaterial();
-	PlayDestroyedDamageSmoke();
-	SetState(ET72TankAIState::Destroyed);
-
-	DebugLog(TEXT("[T72 FX] Destroyed tank visual enabled after engine burnout"));
 }
 
 void UT72TankAIComponent::TriggerCrewEvacuation()
@@ -2148,10 +2076,7 @@ void UT72TankAIComponent::ClearDamageTimers()
 		return;
 	}
 
-	GetWorld()->GetTimerManager().ClearTimer(EngineBurnoutTimerHandle);
 	GetWorld()->GetTimerManager().ClearTimer(EngineMobilityFailureTimerHandle);
-	GetWorld()->GetTimerManager().ClearTimer(EngineSecondaryExplosionTimerHandle);
-	GetWorld()->GetTimerManager().ClearTimer(EngineHalfBurnTimerHandle);
 	GetWorld()->GetTimerManager().ClearTimer(TrackTurnReactionTimerHandle);
 	GetWorld()->GetTimerManager().ClearTimer(TrackCrewEvacTimerHandle);
 	GetWorld()->GetTimerManager().ClearTimer(CrewSpawnDelayTimerHandle);

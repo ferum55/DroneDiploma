@@ -15,6 +15,7 @@
 #include "NavigationPath.h"
 #include "NavigationSystem.h"
 #include "TimerManager.h"
+#include "MissionScenarioController.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogInfantryAI, Log, All);
 
@@ -251,6 +252,8 @@ float AInfantryAIController::GetCurrentObjectiveAcceptanceRadius() const
 
 	case EInfantryMissionObjective::HoldPosition:
 		return HoldPositionAcceptanceRadiusCm;
+	case EInfantryMissionObjective::MoveToEscapePoint:
+		return EscapeObjectiveAcceptanceRadiusCm;
 
 	default:
 		return MissionObjectiveAcceptanceRadiusCm;
@@ -527,6 +530,22 @@ void AInfantryAIController::BeginMissionObjectiveMoveToLocation(FVector Objectiv
 	StartMissionObjective(EInfantryMissionObjective::MoveToObjective, nullptr, ObjectiveLocation, bRunToObjective);
 }
 
+void AInfantryAIController::BeginEscapeOnFootToLocation(FVector EscapeLocation)
+{
+	bEscapeOnFootReported = false;
+	StartMissionObjective(EInfantryMissionObjective::MoveToEscapePoint, nullptr, EscapeLocation, true);
+}
+
+void AInfantryAIController::BeginEscapeOnFootToActor(AActor* EscapePoint)
+{
+	if (!EscapePoint)
+	{
+		return;
+	}
+
+	BeginEscapeOnFootToLocation(EscapePoint->GetActorLocation());
+}
+
 void AInfantryAIController::ResumeCurrentObjective()
 {
 	if (!bHasMissionObjective)
@@ -670,6 +689,10 @@ void AInfantryAIController::ApplyMissionObjectiveMovement()
 		SetShouldRun(false);
 		SetInCover(true);
 		Infantry->SetAIAnimState(MissionObjectiveWaitState);
+		if (CurrentMissionObjective == EInfantryMissionObjective::MoveToEscapePoint)
+		{
+			ReportEscapeOnFootReached();
+		}
 
 		/*UE_LOG(LogInfantryAI, Warning, TEXT("[INF OBJECTIVE] Waiting | Pawn=%s Type=%d Location=%s"),
 			*GetNameSafe(ControlledPawn),
@@ -711,6 +734,31 @@ bool AInfantryAIController::HasReachedMissionObjective() const
 		return false;
 	}
 	return FVector::Dist2D(ControlledPawn->GetActorLocation(), MissionObjectiveLocation) <= GetCurrentObjectiveAcceptanceRadius();
+}
+
+void AInfantryAIController::ReportEscapeOnFootReached()
+{
+	if (bEscapeOnFootReported)
+	{
+		return;
+	}
+
+	bEscapeOnFootReported = true;
+
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifyCrewEscapedOnFoot(1);
+	}
+
+	APawn* ControlledPawn = GetPawn();
+
+	if (ControlledPawn)
+	{
+		ControlledPawn->SetActorHiddenInGame(true);
+		ControlledPawn->SetActorEnableCollision(false);
+		ControlledPawn->Destroy();
+	}
 }
 
 void AInfantryAIController::ClearThreatState()

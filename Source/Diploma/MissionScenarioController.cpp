@@ -1,5 +1,6 @@
 ﻿#include "MissionScenarioController.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 
 AMissionScenarioController::AMissionScenarioController()
 {
@@ -101,6 +102,7 @@ void AMissionScenarioController::NotifyMissionObjectiveDestroyed(FName Objective
 			SetPrimaryObjectiveCompleted(TEXT("Primary_DestroyMortar"));
 		}
 
+		EvaluateMissionCompletion();
 		return;
 	}
 
@@ -113,6 +115,7 @@ void AMissionScenarioController::NotifyMissionObjectiveDestroyed(FName Objective
 			CompleteFlag(TEXT("Bonus_DestroyAmmo"));
 		}
 
+		EvaluateMissionCompletion();
 		return;
 	}
 
@@ -122,6 +125,8 @@ void AMissionScenarioController::NotifyMissionObjectiveDestroyed(FName Objective
 	{
 		SetPrimaryObjectiveCompleted(*FString::Printf(TEXT("Primary_%s"), *ObjectiveId.ToString()));
 	}
+
+	EvaluateMissionCompletion();
 
 	UE_LOG(LogTemp, Warning, TEXT("[MISSION] Objective destroyed | Id=%s Actor=%s Score=%d Total=%d"),
 		*ObjectiveId.ToString(),
@@ -140,16 +145,19 @@ void AMissionScenarioController::NotifyInfantryKilled(FName KillGroupId, int32 C
 	if (KillGroupId == SPGCrewGroupId)
 	{
 		AwardGroupUnits(SPGCrewGroupId, Count, SPGCrewScorePerUnit, MaxSPGCrewCount, TEXT("Bonus_DestroySPGCrew"));
+		EvaluateMissionCompletion();
 		return;
 	}
 
 	if (KillGroupId == TankCrewGroupId)
 	{
 		AwardGroupUnits(TankCrewGroupId, Count, TankCrewScorePerUnit, MaxTankCrewCount, TEXT("Bonus_DestroyTankCrew"));
+		EvaluateMissionCompletion();
 		return;
 	}
 
 	AwardGroupUnits(EnemyInfantryGroupId, Count, EnemyInfantryScorePerUnit, MaxEnemyInfantryCount, TEXT("Bonus_DestroyInfantry"));
+	EvaluateMissionCompletion();
 }
 
 void AMissionScenarioController::NotifySPGMinorDamage()
@@ -169,7 +177,12 @@ void AMissionScenarioController::NotifySPGImmobilized()
 		return;
 	}
 
+	bSPGNeutralized = true;
+
 	AddVehicleScoreProgress(TEXT("SPG_Immobilized"), SPGVehicleScoreProgress, SPGMaxVehicleScore, SPGImmobilizedScore);
+	SetPrimaryObjectiveCompleted(TEXT("Primary_DestroySPG"));
+
+	EvaluateMissionCompletion();
 }
 
 void AMissionScenarioController::NotifySPGDestroyed(int32 CrewInsideCount)
@@ -182,6 +195,8 @@ void AMissionScenarioController::NotifySPGDestroyed(int32 CrewInsideCount)
 	if (!bSPGDestroyed)
 	{
 		bSPGDestroyed = true;
+		bSPGNeutralized = true;
+
 		AddVehicleScoreProgress(TEXT("SPG_Destroyed"), SPGVehicleScoreProgress, SPGMaxVehicleScore, SPGMaxVehicleScore);
 		SetPrimaryObjectiveCompleted(TEXT("Primary_DestroySPG"));
 
@@ -190,6 +205,8 @@ void AMissionScenarioController::NotifySPGDestroyed(int32 CrewInsideCount)
 			AwardGroupUnits(SPGCrewGroupId, CrewInsideCount, SPGCrewScorePerUnit, MaxSPGCrewCount, TEXT("Bonus_DestroySPGCrew"));
 		}
 	}
+
+	EvaluateMissionCompletion();
 }
 
 void AMissionScenarioController::NotifySPGEscaped()
@@ -201,7 +218,8 @@ void AMissionScenarioController::NotifySPGEscaped()
 
 	bSPGEscaped = true;
 	FailFlag(TEXT("Primary_DestroySPG"));
-	FinishMission(false);
+
+	EvaluateMissionCompletion();
 }
 
 void AMissionScenarioController::NotifyTankGunDestroyed()
@@ -213,6 +231,8 @@ void AMissionScenarioController::NotifyTankGunDestroyed()
 
 	AddVehicleScoreProgress(TEXT("Tank_GunDestroyed"), TankVehicleScoreProgress, TankMaxVehicleScore, TankGunDestroyedScore);
 	SetPrimaryObjectiveCompleted(TEXT("Primary_DefendFriendlyPosition"));
+
+	EvaluateMissionCompletion();
 }
 
 void AMissionScenarioController::NotifyTankImmobilized()
@@ -222,8 +242,12 @@ void AMissionScenarioController::NotifyTankImmobilized()
 		return;
 	}
 
+	bTankNeutralized = true;
+
 	AddVehicleScoreProgress(TEXT("Tank_Immobilized"), TankVehicleScoreProgress, TankMaxVehicleScore, TankImmobilizedScore);
 	SetPrimaryObjectiveCompleted(TEXT("Primary_DefendFriendlyPosition"));
+
+	EvaluateMissionCompletion();
 }
 
 void AMissionScenarioController::NotifyTankCrewEvacuationStarted()
@@ -233,7 +257,11 @@ void AMissionScenarioController::NotifyTankCrewEvacuationStarted()
 		return;
 	}
 
+	bTankNeutralized = true;
+
 	SetPrimaryObjectiveCompleted(TEXT("Primary_DefendFriendlyPosition"));
+
+	EvaluateMissionCompletion();
 }
 
 void AMissionScenarioController::NotifyTankDestroyed(int32 CrewInsideCount)
@@ -246,6 +274,8 @@ void AMissionScenarioController::NotifyTankDestroyed(int32 CrewInsideCount)
 	if (!bTankDestroyed)
 	{
 		bTankDestroyed = true;
+		bTankNeutralized = true;
+
 		AddVehicleScoreProgress(TEXT("Tank_Destroyed"), TankVehicleScoreProgress, TankMaxVehicleScore, TankMaxVehicleScore);
 		SetPrimaryObjectiveCompleted(TEXT("Primary_DefendFriendlyPosition"));
 		CompleteFlag(TEXT("Bonus_DestroyTank"));
@@ -255,6 +285,8 @@ void AMissionScenarioController::NotifyTankDestroyed(int32 CrewInsideCount)
 			AwardGroupUnits(TankCrewGroupId, CrewInsideCount, TankCrewScorePerUnit, MaxTankCrewCount, TEXT("Bonus_DestroyTankCrew"));
 		}
 	}
+
+	EvaluateMissionCompletion();
 }
 
 void AMissionScenarioController::NotifyAPCDestroyed(int32 LoadedCrewCount)
@@ -282,6 +314,78 @@ void AMissionScenarioController::NotifyAPCDestroyed(int32 LoadedCrewCount)
 			AwardGroupUnits(TankCrewGroupId, LoadedCrewCount, TankCrewScorePerUnit, MaxTankCrewCount, TEXT("Bonus_DestroyTankCrew"));
 		}
 	}
+
+	EvaluateMissionCompletion();
+}
+
+void AMissionScenarioController::NotifyAPCEscaped(int32 LoadedCrewCount)
+{
+	if (MissionState != EMissionScenarioState::Active)
+	{
+		return;
+	}
+
+	if (!bAPCEscaped)
+	{
+		bAPCEscaped = true;
+		FailFlag(TEXT("Bonus_DestroyAPC"));
+	}
+
+	if (LoadedCrewCount > 0)
+	{
+		const int32 ExpectedCrew = GetExpectedCrewCountForMission();
+		const int32 DestroyedCrew = GetDestroyedCrewCountForMission();
+		const int32 RemainingCrewToResolve = FMath::Max(0, ExpectedCrew - DestroyedCrew - EscapedCrewCount);
+		const int32 NewlyEscapedCrew = FMath::Min(LoadedCrewCount, RemainingCrewToResolve);
+
+		EscapedCrewCount += NewlyEscapedCrew;
+
+		const FName CrewFlagId = GetCrewBonusFlagIdForMission();
+
+		if (!CrewFlagId.IsNone())
+		{
+			FailFlag(CrewFlagId);
+		}
+	}
+
+	EvaluateMissionCompletion();
+
+	UE_LOG(LogTemp, Warning, TEXT("[MISSION] APC escaped | LoadedCrew=%d EscapedCrewTotal=%d"),
+		LoadedCrewCount,
+		EscapedCrewCount);
+}
+
+void AMissionScenarioController::NotifyCrewEscapedOnFoot(int32 InEscapedCrewCount)
+{
+	if (MissionState != EMissionScenarioState::Active || InEscapedCrewCount <= 0)
+	{
+		return;
+	}
+
+	const int32 ExpectedCrew = GetExpectedCrewCountForMission();
+	const int32 DestroyedCrew = GetDestroyedCrewCountForMission();
+	const int32 RemainingCrewToResolve = FMath::Max(0, ExpectedCrew - DestroyedCrew - EscapedCrewCount);
+	const int32 NewlyEscapedCrew = FMath::Min(InEscapedCrewCount, RemainingCrewToResolve);
+
+	if (NewlyEscapedCrew <= 0)
+	{
+		return;
+	}
+
+	EscapedCrewCount += NewlyEscapedCrew;
+
+	const FName CrewFlagId = GetCrewBonusFlagIdForMission();
+
+	if (!CrewFlagId.IsNone())
+	{
+		FailFlag(CrewFlagId);
+	}
+
+	EvaluateMissionCompletion();
+
+	UE_LOG(LogTemp, Warning, TEXT("[MISSION] Crew escaped on foot | Count=%d EscapedCrewTotal=%d"),
+		NewlyEscapedCrew,
+		EscapedCrewCount);
 }
 
 void AMissionScenarioController::NotifyFriendlyPositionDestroyed()
@@ -293,7 +397,8 @@ void AMissionScenarioController::NotifyFriendlyPositionDestroyed()
 
 	bFriendlyPositionDestroyed = true;
 	FailFlag(TEXT("Primary_DefendFriendlyPosition"));
-	FinishMission(false);
+
+	EvaluateMissionCompletion();
 }
 
 void AMissionScenarioController::NotifyDroneUsed()
@@ -304,7 +409,20 @@ void AMissionScenarioController::NotifyDroneUsed()
 	}
 
 	UsedDroneCount = FMath::Clamp(UsedDroneCount + 1, 0, AvailableDroneCount);
-	EvaluateAfterDroneUsed();
+
+	if (!bDroneUseEvaluationPending)
+	{
+		bDroneUseEvaluationPending = true;
+
+		if (GetWorld())
+		{
+			GetWorld()->GetTimerManager().SetTimerForNextTick(this, &AMissionScenarioController::EvaluateAfterDroneUsed);
+		}
+		else
+		{
+			EvaluateAfterDroneUsed();
+		}
+	}
 
 	UE_LOG(LogTemp, Warning, TEXT("[MISSION] Drone used | Used=%d Available=%d"),
 		UsedDroneCount,
@@ -376,6 +494,7 @@ void AMissionScenarioController::ResetMissionRuntimeState()
 {
 	Score = 0;
 	UsedDroneCount = 0;
+	bDroneUseEvaluationPending = false;
 	MissionStartTimeSeconds = 0.0f;
 	MissionEndTimeSeconds = 0.0f;
 	bPrimaryObjectiveCompleted = false;
@@ -390,6 +509,18 @@ void AMissionScenarioController::ResetMissionRuntimeState()
 	bSPGDestroyed = false;
 	bTankDestroyed = false;
 	bAPCDestroyed = false;
+
+	bSPGEscaped = false;
+	bSPGDestroyed = false;
+	bTankDestroyed = false;
+	bAPCDestroyed = false;
+	bSPGNeutralized = false;
+	bTankNeutralized = false;
+	bAPCEscaped = false;
+
+	EscapedCrewCount = 0;
+	bAPCEscaped = false;
+	EscapedCrewCount = 0;
 
 	AwardedScoreEvents.Empty();
 	CountedUnitsByGroup.Empty();
@@ -412,25 +543,24 @@ void AMissionScenarioController::ConfigureDefaultFlags()
 
 	if (MissionType == EMissionScenarioType::MortarPosition)
 	{
-		AddFlag(TEXT("Primary_DestroyMortar"), TEXT("Знищити мінометну позицію"), true);
-		AddFlag(TEXT("Bonus_DestroyAmmo"), TEXT("Знищити боєкомплект"), false);
-		AddFlag(TEXT("Bonus_DestroyInfantry"), TEXT("Знищити піхоту на позиції"), false);
+		AddFlag(TEXT("Primary_DestroyMortar"), TEXT("ЗНИЩИТИ МІНОМЕТНУ ПОЗИЦІЮ"), true);
+		AddFlag(TEXT("Bonus_DestroyAmmo"), TEXT("ЗНИЩИТИ БОЄКОМПЛЕКТ"), false);
+		AddFlag(TEXT("Bonus_DestroyInfantry"), TEXT("ЗНИЩИТИ ПІХОТУ НА ПОЗИЦІЇ"), false);
 	}
 	else if (MissionType == EMissionScenarioType::SPGStrike)
 	{
-		AddFlag(TEXT("Primary_DestroySPG"), TEXT("Знищити САУ"), true);
-		AddFlag(TEXT("Bonus_DestroySPGCrew"), TEXT("Знищити екіпаж"), false);
-		AddFlag(TEXT("Bonus_DestroyAPC"), TEXT("Знищити евакуаційну машину"), false);
+		AddFlag(TEXT("Primary_DestroySPG"), TEXT("ЗНИЩИТИ САУ"), true);
+		AddFlag(TEXT("Bonus_DestroySPGCrew"), TEXT("ЗНИЩИТИ ЕКІПАЖ"), false);
+		AddFlag(TEXT("Bonus_DestroyAPC"), TEXT("ЗНИЩИТИ ЕВАКУАЦІЙНУ МАШИНУ"), false);
 	}
 	else if (MissionType == EMissionScenarioType::TankAttack)
 	{
-		AddFlag(TEXT("Primary_DefendFriendlyPosition"), TEXT("Не допустити знищення позиції"), true);
-		AddFlag(TEXT("Bonus_DestroyTank"), TEXT("Знищити танк Т-72Б3"), false);
-		AddFlag(TEXT("Bonus_DestroyTankCrew"), TEXT("Знищити екіпаж"), false);
-		AddFlag(TEXT("Bonus_DestroyAPC"), TEXT("Знищити евакуаційну машину"), false);
+		AddFlag(TEXT("Primary_DefendFriendlyPosition"), TEXT("НЕ ДОПУСТИТИ ЗНИЩЕННЯ ПОЗИЦІЇ"), true);
+		AddFlag(TEXT("Bonus_DestroyTank"), TEXT("ЗНИЩИТИ ТАНК Т-72Б3"), false);
+		AddFlag(TEXT("Bonus_DestroyTankCrew"), TEXT("ЗНИЩИТИ ЕКІПАЖ"), false);
+		AddFlag(TEXT("Bonus_DestroyAPC"), TEXT("ЗНИЩИТИ ЕВАКУАЦІЙНУ МАШИНУ"), false);
 	}
 }
-
 void AMissionScenarioController::AddFlag(FName FlagId, const FString& DisplayName, bool bPrimary)
 {
 	FMissionFlagState Flag;
@@ -518,6 +648,7 @@ void AMissionScenarioController::CompleteFlag(FName FlagId)
 	Flag->bFailed = false;
 
 	BP_OnFlagChanged(FlagId, true, false);
+	EvaluateMissionCompletion();
 
 	UE_LOG(LogTemp, Warning, TEXT("[MISSION FLAG] Completed=%s"), *FlagId.ToString());
 }
@@ -535,6 +666,7 @@ void AMissionScenarioController::FailFlag(FName FlagId)
 	Flag->bCompleted = false;
 
 	BP_OnFlagChanged(FlagId, false, true);
+	EvaluateMissionCompletion();
 
 	UE_LOG(LogTemp, Warning, TEXT("[MISSION FLAG] Failed=%s"), *FlagId.ToString());
 }
@@ -580,6 +712,13 @@ void AMissionScenarioController::AwardGroupUnits(FName GroupId, int32 Count, int
 
 void AMissionScenarioController::EvaluateAfterDroneUsed()
 {
+	bDroneUseEvaluationPending = false;
+
+	if (MissionState != EMissionScenarioState::Active)
+	{
+		return;
+	}
+
 	if (UsedDroneCount < AvailableDroneCount)
 	{
 		return;
@@ -723,4 +862,207 @@ FText AMissionScenarioController::GetMissionTitle() const
 	}
 
 	return FText::FromString(TEXT("РЕЗУЛЬТАТИ МІСІЇ"));
+}
+
+void AMissionScenarioController::EvaluateMissionCompletion()
+{
+	if (MissionState != EMissionScenarioState::Active)
+	{
+		return;
+	}
+
+	if (MissionType == EMissionScenarioType::MortarPosition)
+	{
+		if (IsMortarMissionFullyCompleted())
+		{
+			FinishMission(true);
+		}
+
+		return;
+	}
+
+	if (MissionType == EMissionScenarioType::SPGStrike)
+	{
+		if (bSPGEscaped)
+		{
+			FinishMission(false);
+			return;
+		}
+
+		if (IsSPGMissionFullyCompleted())
+		{
+			FinishMission(true);
+		}
+
+		return;
+	}
+
+	if (MissionType == EMissionScenarioType::TankAttack)
+	{
+		if (bFriendlyPositionDestroyed)
+		{
+			FinishMission(false);
+			return;
+		}
+
+		if (IsTankMissionFullyCompleted())
+		{
+			FinishMission(true);
+		}
+
+		return;
+	}
+}
+
+bool AMissionScenarioController::IsMortarMissionFullyCompleted() const
+{
+	return bMortarDestroyed && bAmmoCrateDestroyed && IsAllEnemyInfantryDestroyed();
+}
+
+bool AMissionScenarioController::IsSPGMissionFullyCompleted() const
+{
+	if (!bSPGNeutralized)
+	{
+		return false;
+	}
+
+	if (bSPGDestroyed && IsCrewFullyDestroyedForMission())
+	{
+		return true;
+	}
+
+	return IsCrewFullyResolvedForMission() && IsEvacVehicleResolved();
+}
+
+bool AMissionScenarioController::IsTankMissionFullyCompleted() const
+{
+	if (!bTankNeutralized)
+	{
+		return false;
+	}
+
+	if (bTankDestroyed && IsCrewFullyDestroyedForMission())
+	{
+		return true;
+	}
+
+	return IsCrewFullyResolvedForMission() && IsEvacVehicleResolved();
+}
+
+FName AMissionScenarioController::GetCrewGroupIdForMission() const
+{
+	if (MissionType == EMissionScenarioType::SPGStrike)
+	{
+		return SPGCrewGroupId;
+	}
+
+	if (MissionType == EMissionScenarioType::TankAttack)
+	{
+		return TankCrewGroupId;
+	}
+
+	if (MissionType == EMissionScenarioType::MortarPosition)
+	{
+		return EnemyInfantryGroupId;
+	}
+
+	return NAME_None;
+}
+
+FName AMissionScenarioController::GetCrewBonusFlagIdForMission() const
+{
+	if (MissionType == EMissionScenarioType::SPGStrike)
+	{
+		return TEXT("Bonus_DestroySPGCrew");
+	}
+
+	if (MissionType == EMissionScenarioType::TankAttack)
+	{
+		return TEXT("Bonus_DestroyTankCrew");
+	}
+
+	if (MissionType == EMissionScenarioType::MortarPosition)
+	{
+		return TEXT("Bonus_DestroyInfantry");
+	}
+
+	return NAME_None;
+}
+
+int32 AMissionScenarioController::GetExpectedCrewCountForMission() const
+{
+	if (MissionType == EMissionScenarioType::SPGStrike)
+	{
+		return MaxSPGCrewCount;
+	}
+
+	if (MissionType == EMissionScenarioType::TankAttack)
+	{
+		return MaxTankCrewCount;
+	}
+
+	if (MissionType == EMissionScenarioType::MortarPosition)
+	{
+		return MaxEnemyInfantryCount;
+	}
+
+	return 0;
+}
+
+int32 AMissionScenarioController::GetDestroyedCrewCountForMission() const
+{
+	const FName CrewGroupId = GetCrewGroupIdForMission();
+
+	if (CrewGroupId.IsNone())
+	{
+		return 0;
+	}
+
+	return CountedUnitsByGroup.FindRef(CrewGroupId);
+}
+
+int32 AMissionScenarioController::GetResolvedCrewCountForMission() const
+{
+	const int32 ExpectedCrew = GetExpectedCrewCountForMission();
+
+	if (ExpectedCrew <= 0)
+	{
+		return 0;
+	}
+
+	return FMath::Clamp(GetDestroyedCrewCountForMission() + EscapedCrewCount, 0, ExpectedCrew);
+}
+
+bool AMissionScenarioController::IsCrewFullyDestroyedForMission() const
+{
+	const int32 ExpectedCrew = GetExpectedCrewCountForMission();
+
+	if (ExpectedCrew <= 0)
+	{
+		return false;
+	}
+
+	return GetDestroyedCrewCountForMission() >= ExpectedCrew;
+}
+
+bool AMissionScenarioController::IsCrewFullyResolvedForMission() const
+{
+	const int32 ExpectedCrew = GetExpectedCrewCountForMission();
+
+	if (ExpectedCrew <= 0)
+	{
+		return false;
+	}
+
+	return GetResolvedCrewCountForMission() >= ExpectedCrew;
+}
+
+bool AMissionScenarioController::IsEvacVehicleResolved() const
+{
+	return bAPCDestroyed || bAPCEscaped;
+}
+
+bool AMissionScenarioController::IsAllEnemyInfantryDestroyed() const
+{
+	return CountedUnitsByGroup.FindRef(EnemyInfantryGroupId) >= MaxEnemyInfantryCount;
 }

@@ -13,7 +13,8 @@ enum class EInfantryMissionObjective : uint8
 	HoldPosition,
 	MoveToShelter,
 	MoveToBoardingZone,
-	MoveToObjective
+	MoveToObjective,
+	MoveToEscapePoint
 };
 
 UCLASS()
@@ -58,6 +59,12 @@ public:
 	void BeginMissionObjectiveMoveToLocation(FVector ObjectiveLocation, bool bRunToObjective = true);
 
 	UFUNCTION(BlueprintCallable)
+	void BeginEscapeOnFootToLocation(FVector EscapeLocation);
+
+	UFUNCTION(BlueprintCallable)
+	void BeginEscapeOnFootToActor(AActor* EscapePoint);
+
+	UFUNCTION(BlueprintCallable)
 	void ResumeCurrentObjective();
 
 	UFUNCTION(BlueprintCallable)
@@ -72,6 +79,9 @@ public:
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Mission Objective")
 	float MissionObjectiveAcceptanceRadiusCm = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Mission Objective")
+	float EscapeObjectiveAcceptanceRadiusCm = 120.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Mission Objective")
 	float BoardingObjectiveAcceptanceRadiusCm = 60.0f;
@@ -254,6 +264,10 @@ protected:
 	float CombatFacingInterpSpeed = 14.0f;
 
 private:
+
+	bool bEscapeOnFootReported = false;
+
+	void ReportEscapeOnFootReached();
 
 	float GetCurrentObjectiveAcceptanceRadius() const;
 

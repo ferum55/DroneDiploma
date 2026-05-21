@@ -155,6 +155,8 @@ void UAPCAIComponent::StartEvacuation(AActor* InHomePoint, const TArray<AActor*>
 	PendingCrewMember = nullptr;
 	bAssignedCrewOrderedToBoard = false;
 
+	bEscapeReported = false;
+
 	if (!HomePoint)
 	{
 		DebugLog(TEXT("[APC] StartEvacuation failed: HomePoint is null"));
@@ -219,6 +221,7 @@ void UAPCAIComponent::DestroyAPC(const FVector& HitLocation)
 		GetWorld()->GetTimerManager().ClearTimer(AutoStartTimerHandle);
 		GetWorld()->GetTimerManager().ClearTimer(BoardingTimerHandle);
 	}
+	OrderRemainingCrewToEscapeOnFoot();
 
 	SetWheelSpeed(0.0f);
 	SetRearDoorsAngle(OpenRearDoorsAngle);
@@ -241,6 +244,24 @@ bool UAPCAIComponent::IsDestroyed() const
 int32 UAPCAIComponent::GetLoadedCrewCount() const
 {
 	return LoadedCrewCount;
+}
+
+void UAPCAIComponent::NotifyAPCEscapedAtHome()
+{
+	if (bEscapeReported)
+	{
+		return;
+	}
+
+	bEscapeReported = true;
+
+	if (AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+		UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())))
+	{
+		MissionController->NotifyAPCEscaped(LoadedCrewCount);
+	}
+
+	DebugLog(FString::Printf(TEXT("[APC] Escaped at home | LoadedCrew=%d"), LoadedCrewCount));
 }
 
 void UAPCAIComponent::CacheComponents()
@@ -994,6 +1015,61 @@ void UAPCAIComponent::FinishBoardingCrew()
 		ExpectedCrewCount));
 }
 
+void UAPCAIComponent::OrderRemainingCrewToEscapeOnFoot()
+{
+	if (!HomePoint)
+	{
+		return;
+	}
+
+	TArray<AInfantryCharacter*> CrewToEscape;
+
+	CompactAssignedCrew();
+
+	for (AInfantryCharacter* CrewMember : AssignedCrew)
+	{
+		if (CrewMember && !CrewMember->IsDead())
+		{
+			CrewToEscape.AddUnique(CrewMember);
+		}
+	}
+
+	if (PendingCrewMember && !PendingCrewMember->IsDead())
+	{
+		CrewToEscape.AddUnique(PendingCrewMember);
+	}
+
+	const FVector EscapeLocation = HomePoint->GetActorLocation();
+
+	for (AInfantryCharacter* CrewMember : CrewToEscape)
+	{
+		if (!CrewMember || CrewMember->IsDead())
+		{
+			continue;
+		}
+
+		AInfantryAIController* CrewController = Cast<AInfantryAIController>(CrewMember->GetController());
+
+		if (!CrewController)
+		{
+			CrewMember->SpawnDefaultController();
+			CrewController = Cast<AInfantryAIController>(CrewMember->GetController());
+		}
+
+		if (CrewController)
+		{
+			CrewController->BeginEscapeOnFootToLocation(EscapeLocation);
+		}
+	}
+
+	AssignedCrew.Empty();
+	PendingCrewMember = nullptr;
+
+	DebugLog(FString::Printf(TEXT("[APC CREW] Remaining crew ordered to escape on foot | Count=%d Target=%s"),
+		CrewToEscape.Num(),
+		*EscapeLocation.ToString()));
+}
+
 void UAPCAIComponent::TryStartBoarding(AActor* OtherActor)
 {
 	if (CurrentState != EAPCAIState::WaitingForCrew)
@@ -1594,9 +1670,26 @@ void UAPCAIComponent::TickReturnRoute(float DeltaTime)
 
 	if (HomePoint)
 	{
-		TickMoveToTarget(DeltaTime, HomePoint, EAPCAIState::Inactive);
+		if (IsAtActor2D(HomePoint))
+		{
+			SetWheelSpeed(0.0f);
+			NotifyAPCEscapedAtHome();
+			SetState(EAPCAIState::Inactive);
+			return;
+		}
+
+		TickMoveToTarget(DeltaTime, HomePoint, EAPCAIState::Returning);
+
+		if (IsAtActor2D(HomePoint))
+		{
+			SetWheelSpeed(0.0f);
+			NotifyAPCEscapedAtHome();
+			SetState(EAPCAIState::Inactive);
+		}
+
 		return;
 	}
 
+	NotifyAPCEscapedAtHome();
 	SetState(EAPCAIState::Inactive);
 }

@@ -2075,6 +2075,11 @@ void USPGAIComponent::OnDamageZoneBeginOverlap(UPrimitiveComponent* OverlappedCo
 	const bool bValidDirectHit = IsValidDirectWarheadHit(OverlappedComponent, OtherActor, OtherComp, HitLocation);
 	const bool bWarheadContact = IsDroneWarheadComponent(OtherComp);
 
+	if (bWarheadContact)
+	{
+		CrashDroneOnVulnerableZoneContact(OtherActor, OverlappedComponent, OtherComp);
+	}
+
 	if (bValidDirectHit)
 	{
 		ApplyZoneDamage(Zone, HitLocation);
@@ -2083,13 +2088,7 @@ void USPGAIComponent::OnDamageZoneBeginOverlap(UPrimitiveComponent* OverlappedCo
 	{
 		DebugLog(FString::Printf(TEXT("[SPG DAMAGE] Zone touched but rejected: %s OtherComp=%s"), *UEnum::GetValueAsString(Zone), OtherComp ? *OtherComp->GetName() : TEXT("NULL")));
 	}
-
-	if (bWarheadContact)
-	{
-		CrashDroneOnVulnerableZoneContact(OtherActor, OverlappedComponent, OtherComp);
-	}
 }
-
 bool USPGAIComponent::TraceGroundPoint(const FVector& WorldPoint, FVector& OutHitLocation, FVector& OutHitNormal) const
 {
 	UWorld* World = GetWorld();

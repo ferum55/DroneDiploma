@@ -478,7 +478,6 @@ private:
 	void DebugLog(const FString& Message) const;
 
 	TMap<UPrimitiveComponent*, ET72DamageZone> DamageZoneMap;
-	FTimerHandle EngineBurnoutTimerHandle;
 
 	void RegisterDamageZones();
 	ET72DamageZone GetDamageZoneByComponent(UPrimitiveComponent* Component) const;
@@ -514,10 +513,6 @@ private:
 	void FinishTrackTurnReaction();
 	void StartTrackCrewEvacTimer();
 	void FinishTrackCrewEvacTimer();
-
-
-	FTimerHandle EngineSecondaryExplosionTimerHandle;
-	FTimerHandle EngineHalfBurnTimerHandle;
 
 	UParticleSystemComponent* EngineFirePSC = nullptr;
 	UParticleSystemComponent* CommandHatchSmokePSC = nullptr;

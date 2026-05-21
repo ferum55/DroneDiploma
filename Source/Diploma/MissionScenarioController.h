@@ -94,6 +94,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Mission|APC")
 	void NotifyAPCDestroyed(int32 LoadedCrewCount);
 
+	UFUNCTION(BlueprintCallable, Category = "Mission|APC")
+	void NotifyAPCEscaped(int32 LoadedCrewCount);
+
+	UFUNCTION(BlueprintCallable, Category = "Mission|Crew")
+	void NotifyCrewEscapedOnFoot(int32 EscapedCrewCount);
+
 	UFUNCTION(BlueprintCallable, Category = "Mission|Friendly")
 	void NotifyFriendlyPositionDestroyed();
 
@@ -309,6 +315,7 @@ private:
 	int32 SPGVehicleScoreProgress = 0;
 	int32 TankVehicleScoreProgress = 0;
 
+	bool bDroneUseEvaluationPending = false;
 	bool bMortarDestroyed = false;
 	bool bAmmoCrateDestroyed = false;
 	bool bFriendlyPositionDestroyed = false;
@@ -316,6 +323,11 @@ private:
 	bool bSPGDestroyed = false;
 	bool bTankDestroyed = false;
 	bool bAPCDestroyed = false;
+	bool bAPCEscaped = false;
+	int32 EscapedCrewCount = 0;
+	bool bSPGNeutralized = false;
+	bool bTankNeutralized = false;
+
 
 	void ResetMissionRuntimeState();
 	void ConfigureDefaultFlags();
@@ -329,6 +341,22 @@ private:
 	FMissionFlagState* FindFlag(FName FlagId);
 	void AwardGroupUnits(FName GroupId, int32 Count, int32 ScorePerUnit, int32 MaxCount, FName CompletionFlagId);
 	void EvaluateAfterDroneUsed();
+	void EvaluateMissionCompletion();
+
+	bool IsMortarMissionFullyCompleted() const;
+	bool IsSPGMissionFullyCompleted() const;
+	bool IsTankMissionFullyCompleted() const;
+
+	FName GetCrewGroupIdForMission() const;
+	FName GetCrewBonusFlagIdForMission() const;
+	int32 GetExpectedCrewCountForMission() const;
+	int32 GetDestroyedCrewCountForMission() const;
+	int32 GetResolvedCrewCountForMission() const;
+
+	bool IsCrewFullyDestroyedForMission() const;
+	bool IsCrewFullyResolvedForMission() const;
+	bool IsEvacVehicleResolved() const;
+	bool IsAllEnemyInfantryDestroyed() const;
 	int32 GetAPCDestroyedScoreForMission() const;
 	FName MakeEventId(const FString& Prefix) const;
 };

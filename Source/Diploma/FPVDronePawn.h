@@ -130,6 +130,7 @@ private:
     float LastDeltaSeconds = 0.f;
 
     bool bCrashed = false;
+    bool bMissionDroneUseReported = false;
     FVector SpawnLocation;
     FRotator SpawnRotation;
     float LastSpawnWorldTime = 0.f;
@@ -196,7 +197,7 @@ private:
 
     UFUNCTION()
     void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);
-
+    void ReportDroneUsedToMission();
     void ToggleArm();
     void ToggleBombArm();
     void ThrottleInput(float Value);
