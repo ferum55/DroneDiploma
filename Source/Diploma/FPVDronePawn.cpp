@@ -32,7 +32,7 @@ AFPVDronePawn::AFPVDronePawn()
     {
         ConstructorHelpers::FObjectFinderOptional<UStaticMesh> PlaneMesh;
         FConstructorStatics()
-            : PlaneMesh(TEXT("/Game/Flying/Meshes/UFO.UFO"))
+            : PlaneMesh(TEXT("C:/Games/Unreal Projects/Diploma/Content/FPV/fpv.fpv"))
         {
         }
     };

@@ -203,6 +203,24 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission")
 	int32 AvailableDroneCount = 3;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission|Briefing Map")
+	AActor* DroneSpawnActor = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission|Briefing Map")
+	AActor* EnemyPositionActor = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission|Briefing Map")
+	AActor* FriendlyPositionActor = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission|Briefing Map")
+	AActor* FirePositionActor = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission|Briefing Map")
+	TArray<AActor*> RoutePointActors;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission|Briefing Map")
+	AActor* GridHighlightActor = nullptr;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mission|Score")
 	int32 MaxMissionScore = 100;
 
