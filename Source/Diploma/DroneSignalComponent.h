@@ -8,6 +8,7 @@
 
 class UStaticMeshComponent;
 class UMaterialInstanceDynamic;
+class ASignalBoundaryVolume;
 
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class DIPLOMA_API UDroneSignalComponent : public UActorComponent
@@ -53,9 +54,48 @@ public:
 	bool WasLastControlPacketReceived() const { return bLastControlPacketReceived; }
 	float GetControlPacketAgeSeconds() const { return ControlPacketAgeSeconds; }
 
+protected:
+	virtual void BeginPlay() override;
+
 	
 
 private:
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal|Boundary")
+	ASignalBoundaryVolume* SignalBoundaryVolume = nullptr;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal|Boundary")
+	bool bUseBoundarySignalPenalty = true;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal|Boundary")
+	float BoundaryWarningDistanceCm = 50000.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal|Boundary")
+	float OutsideFullPenaltyDistanceCm = 50000.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal|Boundary")
+	float BoundaryControlWarningLossDb = 8.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal|Boundary")
+	float BoundaryVideoWarningLossDb = 15.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal|Boundary")
+	float BoundaryControlEdgeLossDb = 25.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal|Boundary")
+	float BoundaryVideoEdgeLossDb = 40.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal|Boundary")
+	float BoundaryControlMaxLossDb = 95.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal|Boundary")
+	float BoundaryVideoMaxLossDb = 130.f;
+
+	float ComputeBoundarySignedDistanceCm(UStaticMeshComponent* DroneMesh) const;
+	float ComputeGameplaySignalLossDb(UStaticMeshComponent* DroneMesh, bool bVideo) const;
+
+
+
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
 	FVector OperatorLocation = FVector::ZeroVector;
 
@@ -114,7 +154,16 @@ private:
 	float ControlObstructionLossDb = 22.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
-	float VideoObstructionLossDb = 35.f;
+	float VideoObstructionLossDb = 12.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoDistanceExtraLossStartM = 1000.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoDistanceExtraLossFullM = 4000.f;
+
+	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
+	float VideoDistanceExtraMaxLossDb = 35.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
 	float ControlMaxDisplayedRSSIDbm = -35.f;
@@ -147,19 +196,19 @@ private:
 	float ControlAntennaOrientationMaxLossDb = 4.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
-	float VideoAntennaOrientationMaxLossDb = 8.f;
+	float VideoAntennaOrientationMaxLossDb = 4.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
 	float ControlBodyShadowMaxLossDb = 5.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
-	float VideoBodyShadowMaxLossDb = 12.f;
+	float VideoBodyShadowMaxLossDb = 8.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
 	float ControlRandomFadeMaxDb = 2.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
-	float VideoRandomFadeMaxDb = 6.f;
+	float VideoRandomFadeMaxDb = 4.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
 	float SignalFadeUpdateInterval = 0.25f;

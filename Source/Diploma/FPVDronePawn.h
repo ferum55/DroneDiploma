@@ -228,6 +228,7 @@ private:
     void StartKillCam(const FVector& HitLocation);
     void EndKillCam();
     void UpdateKillCamReplay(float DeltaSeconds);
+    bool ShouldHoldKillCamAfterMissionEnd() const;
     void ResetDroneStateAfterRespawn();
 
 

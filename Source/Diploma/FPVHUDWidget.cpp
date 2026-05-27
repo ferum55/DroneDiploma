@@ -200,17 +200,6 @@ void UFPVHUDWidget::ApplyTelemetry(const FDroneTelemetry& InTelemetry)
 		));
 	}
 
-	if (Text_Timer)
-	{
-		const int32 TotalSeconds = FMath::Max(0, FMath::FloorToInt(InTelemetry.FlightTimeSeconds));
-		const int32 Minutes = TotalSeconds / 60;
-		const int32 Seconds = TotalSeconds % 60;
-
-		Text_Timer->SetText(FText::FromString(
-			FString::Printf(TEXT("%02d:%02d"), Minutes, Seconds)
-		));
-	}
-
 	if (Text_HeadingDegrees)
 	{
 		Text_HeadingDegrees->SetText(FText::FromString(

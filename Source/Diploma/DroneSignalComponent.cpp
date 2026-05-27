@@ -1,10 +1,25 @@
 #include "DroneSignalComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
+#include "SignalBoundaryVolume.h"
+#include "Components/BoxComponent.h"
+#include "Kismet/GameplayStatics.h"
+
 
 UDroneSignalComponent::UDroneSignalComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+}
+void UDroneSignalComponent::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (!SignalBoundaryVolume && GetWorld())
+	{
+		SignalBoundaryVolume = Cast<ASignalBoundaryVolume>(
+			UGameplayStatics::GetActorOfClass(GetWorld(), ASignalBoundaryVolume::StaticClass())
+		);
+	}
 }
 
 void UDroneSignalComponent::ResetSignalState()
@@ -231,17 +246,37 @@ void UDroneSignalComponent::UpdateSignalTelemetry(
 	const float ControlBodyShadowLossDb = ComputeBodyShadowLossDb(DroneMesh, ControlBodyShadowMaxLossDb);
 	const float VideoBodyShadowLossDb = ComputeBodyShadowLossDb(DroneMesh, VideoBodyShadowMaxLossDb);
 
+	const float GameplayControlLossDb = ComputeGameplaySignalLossDb(DroneMesh, false);
+	const float GameplayVideoLossDb = ComputeGameplaySignalLossDb(DroneMesh, true);
+
 	const float ControlExtraLossDb =
 		Obstruction * ControlObstructionLossDb +
 		ControlAntennaLossDb +
 		ControlBodyShadowLossDb +
-		SmoothedControlFadeLossDb;
+		SmoothedControlFadeLossDb +
+		GameplayControlLossDb;
+
+	const float VideoDistanceExtraLossAlpha = FMath::GetMappedRangeValueClamped(
+		FVector2D(VideoDistanceExtraLossStartM, VideoDistanceExtraLossFullM),
+		FVector2D(0.f, 1.f),
+		DistanceM
+	);
+
+	const float VideoDistanceExtraLossDb = VideoDistanceExtraLossAlpha * VideoDistanceExtraMaxLossDb;
+
+	const float VideoObstructionDistanceFactor = FMath::GetMappedRangeValueClamped(
+		FVector2D(100.f, 1200.f),
+		FVector2D(0.35f, 1.f),
+		DistanceM
+	);
 
 	const float VideoExtraLossDb =
-		Obstruction * VideoObstructionLossDb +
+		Obstruction * VideoObstructionLossDb * VideoObstructionDistanceFactor +
 		VideoAntennaLossDb +
 		VideoBodyShadowLossDb +
-		SmoothedVideoFadeLossDb;
+		SmoothedVideoFadeLossDb +
+		VideoDistanceExtraLossDb;
+
 
 	const float RawControlRSSIDbm = ComputeReceivedPowerDbm(
 		ControlTxPowerW,
@@ -582,4 +617,83 @@ float UDroneSignalComponent::ComputeOperatorObstructionFactor(UStaticMeshCompone
 	const float RawObstruction = static_cast<float>(BlockedCount) / static_cast<float>(Offsets.Num());
 
 	return FMath::Clamp(RawObstruction, 0.f, 1.f);
+}
+
+float UDroneSignalComponent::ComputeBoundarySignedDistanceCm(UStaticMeshComponent* DroneMesh) const
+{
+	if (!bUseBoundarySignalPenalty || !DroneMesh || !SignalBoundaryVolume)
+	{
+		return BIG_NUMBER;
+	}
+
+	UBoxComponent* Box = SignalBoundaryVolume->GetBoundaryBox();
+	if (!Box)
+	{
+		return BIG_NUMBER;
+	}
+
+	const FVector DroneWorldLocation = DroneMesh->GetComponentLocation();
+	const FTransform BoxTransform = Box->GetComponentTransform();
+
+	const FVector LocalLocation = BoxTransform.InverseTransformPositionNoScale(DroneWorldLocation);
+	const FVector Extent = Box->GetScaledBoxExtent();
+
+	const FVector AbsLocal(
+		FMath::Abs(LocalLocation.X),
+		FMath::Abs(LocalLocation.Y),
+		FMath::Abs(LocalLocation.Z)
+	);
+
+	const FVector DistanceInside = Extent - AbsLocal;
+
+	const float MinInsideDistance = FMath::Min(
+		FMath::Min(DistanceInside.X, DistanceInside.Y),
+		DistanceInside.Z
+	);
+
+	if (MinInsideDistance >= 0.f)
+	{
+		return MinInsideDistance;
+	}
+
+	const FVector OutsideDistance(
+		FMath::Max(AbsLocal.X - Extent.X, 0.f),
+		FMath::Max(AbsLocal.Y - Extent.Y, 0.f),
+		FMath::Max(AbsLocal.Z - Extent.Z, 0.f)
+	);
+
+	return -OutsideDistance.Size();
+}
+
+float UDroneSignalComponent::ComputeGameplaySignalLossDb(UStaticMeshComponent* DroneMesh, bool bVideo) const
+{
+	const float SignedDistanceCm = ComputeBoundarySignedDistanceCm(DroneMesh);
+
+	const float WarningLossDb = bVideo ? BoundaryVideoWarningLossDb : BoundaryControlWarningLossDb;
+	const float EdgeLossDb = bVideo ? BoundaryVideoEdgeLossDb : BoundaryControlEdgeLossDb;
+	const float MaxLossDb = bVideo ? BoundaryVideoMaxLossDb : BoundaryControlMaxLossDb;
+
+	if (SignedDistanceCm > BoundaryWarningDistanceCm)
+	{
+		return 0.f;
+	}
+
+	if (SignedDistanceCm >= 0.f)
+	{
+		const float WarningAlpha = 1.f - FMath::Clamp(
+			SignedDistanceCm / FMath::Max(BoundaryWarningDistanceCm, 1.f),
+			0.f,
+			1.f
+		);
+
+		return FMath::Lerp(0.f, WarningLossDb, WarningAlpha);
+	}
+
+	const float OutsideAlpha = FMath::Clamp(
+		FMath::Abs(SignedDistanceCm) / FMath::Max(OutsideFullPenaltyDistanceCm, 1.f),
+		0.f,
+		1.f
+	);
+
+	return FMath::Lerp(EdgeLossDb, MaxLossDb, OutsideAlpha);
 }

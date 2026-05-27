@@ -69,9 +69,6 @@ protected:
 	UTextBlock* Text_Throttle;
 
 	UPROPERTY(meta = (BindWidget))
-	UTextBlock* Text_Timer;
-
-	UPROPERTY(meta = (BindWidget))
 	UTextBlock* Text_HeadingDegrees;
 
 	UPROPERTY(meta = (BindWidget))

@@ -32,7 +32,7 @@ AFPVDronePawn::AFPVDronePawn()
     {
         ConstructorHelpers::FObjectFinderOptional<UStaticMesh> PlaneMesh;
         FConstructorStatics()
-            : PlaneMesh(TEXT("C:/Games/Unreal Projects/Diploma/Content/FPV/fpv.fpv"))
+            : PlaneMesh(TEXT("/Game/FPV/FPV.FPV"))
         {
         }
     };
@@ -98,11 +98,11 @@ void AFPVDronePawn::BeginPlay()
 {
     Super::BeginPlay();
 
-    if (GEngine)
+    /*if (GEngine)
     {
         GEngine->Exec(GetWorld(), TEXT("stat fps"));
         GEngine->Exec(GetWorld(), TEXT("stat unit"));
-    }
+    }*/
 
     BaroZeroZ = GetActorLocation().Z;
 
@@ -836,6 +836,25 @@ void AFPVDronePawn::EndKillCam()
     ResetDroneStateAfterRespawn();
 }
 
+bool AFPVDronePawn::ShouldHoldKillCamAfterMissionEnd() const
+{
+    if (!GetWorld())
+    {
+        return false;
+    }
+
+    AMissionScenarioController* MissionController = Cast<AMissionScenarioController>(
+        UGameplayStatics::GetActorOfClass(GetWorld(), AMissionScenarioController::StaticClass())
+    );
+
+    if (!MissionController)
+    {
+        return false;
+    }
+
+    return MissionController->IsMissionFinished() && MissionController->GetRemainingDroneCount() <= 0;
+}
+
 void AFPVDronePawn::UpdateKillCamReplay(float DeltaSeconds)
 {
     if (!KillCamCamera)
@@ -855,10 +874,15 @@ void AFPVDronePawn::UpdateKillCamReplay(float DeltaSeconds)
 
     if (KillCamTimer <= 0.f)
     {
+        if (ShouldHoldKillCamAfterMissionEnd())
+        {
+            KillCamTimer = 0.1f;
+            return;
+        }
+
         EndKillCam();
     }
 }
-
 void AFPVDronePawn::CycleFlightMode()
 {
     if (FlightControllerComponent)

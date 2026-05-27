@@ -1,6 +1,7 @@
 ﻿#include "MissionScenarioController.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "Engine/Engine.h"
 
 AMissionScenarioController::AMissionScenarioController()
 {
@@ -52,15 +53,27 @@ void AMissionScenarioController::RequestFinishMissionFromMenu()
 		return;
 	}
 
+	if (bPrimaryObjectiveCompleted)
+	{
+		ShowMissionEventOnScreen(TEXT("Завершення місії з меню"), FColor::Yellow);
+	}
+	else
+	{
+		ShowMissionEventOnScreen(TEXT("Головну ціль не виконано"), FColor::Red);
+	}
+
 	FinishMission(bPrimaryObjectiveCompleted);
 }
-
 void AMissionScenarioController::FinishMission(bool bSuccess)
 {
 	if (MissionState != EMissionScenarioState::Active)
 	{
 		return;
 	}
+
+	MissionFinishReason = bSuccess
+		? TEXT("МІСІЮ ВИКОНАНО")
+		: TEXT("МІСІЮ ПРОВАЛЕНО");
 
 	MissionState = bSuccess ? EMissionScenarioState::Success : EMissionScenarioState::Failed;
 
@@ -71,13 +84,63 @@ void AMissionScenarioController::FinishMission(bool bSuccess)
 
 	const float FinalTimeSeconds = GetElapsedTimeSeconds();
 
+	ShowMissionFinishReasonOnScreen(bSuccess);
+
 	BP_OnMissionFinished(bSuccess, Score, UsedDroneCount, FinalTimeSeconds);
 
-	UE_LOG(LogTemp, Warning, TEXT("[MISSION] Finished | Success=%d Score=%d Drones=%d Time=%.1f"),
+	UE_LOG(LogTemp, Warning, TEXT("[MISSION] Finished | Success=%d Score=%d Drones=%d Time=%.1f Result=%s"),
 		bSuccess ? 1 : 0,
 		Score,
 		UsedDroneCount,
-		FinalTimeSeconds);
+		FinalTimeSeconds,
+		*MissionFinishReason);
+}
+
+void AMissionScenarioController::SetMissionFinishReason(const FString& Reason)
+{
+	if (!MissionFinishReason.IsEmpty())
+	{
+		return;
+	}
+
+	MissionFinishReason = Reason;
+}
+
+void AMissionScenarioController::ShowMissionFinishReasonOnScreen(bool bSuccess) const
+{
+	if (!GEngine)
+	{
+		return;
+	}
+
+	const FColor MessageColor = bSuccess ? FColor::Green : FColor::Red;
+
+	GEngine->AddOnScreenDebugMessage(
+		-1,
+		5.0f,
+		MessageColor,
+		MissionFinishReason
+	);
+}
+
+void AMissionScenarioController::ShowMissionEventOnScreen(const FString& Message, const FColor& Color) const
+{
+	if (!GEngine)
+	{
+		return;
+	}
+
+	GEngine->AddOnScreenDebugMessage(
+		-1,
+		4.0f,
+		Color,
+		Message
+	);
+}
+
+FString AMissionScenarioController::GetMissionFinishReason() const
+{
+	return MissionFinishReason;
 }
 
 void AMissionScenarioController::NotifyMissionObjectiveDestroyed(FName ObjectiveId, bool bPrimaryObjective, int32 ObjectiveScore, AActor* ObjectiveActor)
@@ -178,6 +241,7 @@ void AMissionScenarioController::NotifySPGImmobilized()
 	}
 
 	bSPGNeutralized = true;
+	ShowMissionEventOnScreen(TEXT("САУ знерухомлено"), FColor::Yellow);
 
 	AddVehicleScoreProgress(TEXT("SPG_Immobilized"), SPGVehicleScoreProgress, SPGMaxVehicleScore, SPGImmobilizedScore);
 	SetPrimaryObjectiveCompleted(TEXT("Primary_DestroySPG"));
@@ -204,6 +268,15 @@ void AMissionScenarioController::NotifySPGDestroyed(int32 CrewInsideCount)
 		{
 			AwardGroupUnits(SPGCrewGroupId, CrewInsideCount, SPGCrewScorePerUnit, MaxSPGCrewCount, TEXT("Bonus_DestroySPGCrew"));
 		}
+
+		if (CrewInsideCount > 0)
+		{
+			ShowMissionEventOnScreen(TEXT("САУ знищено разом з екіпажем"), FColor::Green);
+		}
+		else
+		{
+			ShowMissionEventOnScreen(TEXT("САУ знищено"), FColor::Green);
+		}
 	}
 
 	EvaluateMissionCompletion();
@@ -218,6 +291,7 @@ void AMissionScenarioController::NotifySPGEscaped()
 
 	bSPGEscaped = true;
 	FailFlag(TEXT("Primary_DestroySPG"));
+	ShowMissionEventOnScreen(TEXT("САУ залишила район бойового завдання"), FColor::Red);
 
 	EvaluateMissionCompletion();
 }
@@ -228,7 +302,7 @@ void AMissionScenarioController::NotifyTankGunDestroyed()
 	{
 		return;
 	}
-
+	ShowMissionEventOnScreen(TEXT("Ствол танка пошкоджено"), FColor::Yellow);
 	AddVehicleScoreProgress(TEXT("Tank_GunDestroyed"), TankVehicleScoreProgress, TankMaxVehicleScore, TankGunDestroyedScore);
 	SetPrimaryObjectiveCompleted(TEXT("Primary_DefendFriendlyPosition"));
 
@@ -243,6 +317,7 @@ void AMissionScenarioController::NotifyTankImmobilized()
 	}
 
 	bTankNeutralized = true;
+	ShowMissionEventOnScreen(TEXT("Танк знерухомлено"), FColor::Yellow);
 
 	AddVehicleScoreProgress(TEXT("Tank_Immobilized"), TankVehicleScoreProgress, TankMaxVehicleScore, TankImmobilizedScore);
 	SetPrimaryObjectiveCompleted(TEXT("Primary_DefendFriendlyPosition"));
@@ -258,6 +333,7 @@ void AMissionScenarioController::NotifyTankCrewEvacuationStarted()
 	}
 
 	bTankNeutralized = true;
+	ShowMissionEventOnScreen(TEXT("Екіпаж танка почав евакуацію"), FColor::Yellow);
 
 	SetPrimaryObjectiveCompleted(TEXT("Primary_DefendFriendlyPosition"));
 
@@ -275,6 +351,14 @@ void AMissionScenarioController::NotifyTankDestroyed(int32 CrewInsideCount)
 	{
 		bTankDestroyed = true;
 		bTankNeutralized = true;
+		if (CrewInsideCount > 0)
+		{
+			ShowMissionEventOnScreen(TEXT("Танк знищено разом з екіпажем"), FColor::Green);
+		}
+		else
+		{
+			ShowMissionEventOnScreen(TEXT("Танк знищено"), FColor::Green);
+		}
 
 		AddVehicleScoreProgress(TEXT("Tank_Destroyed"), TankVehicleScoreProgress, TankMaxVehicleScore, TankMaxVehicleScore);
 		SetPrimaryObjectiveCompleted(TEXT("Primary_DefendFriendlyPosition"));
@@ -299,6 +383,14 @@ void AMissionScenarioController::NotifyAPCDestroyed(int32 LoadedCrewCount)
 	if (!bAPCDestroyed)
 	{
 		bAPCDestroyed = true;
+		if (LoadedCrewCount > 0)
+		{
+			ShowMissionEventOnScreen(TEXT("Евакуаційну машину знищено разом з екіпажем"), FColor::Green);
+		}
+		else
+		{
+			ShowMissionEventOnScreen(TEXT("Евакуаційну машину знищено"), FColor::Green);
+		}
 		AddScoreOnce(TEXT("APC_Destroyed"), GetAPCDestroyedScoreForMission());
 		CompleteFlag(TEXT("Bonus_DestroyAPC"));
 	}
@@ -328,6 +420,7 @@ void AMissionScenarioController::NotifyAPCEscaped(int32 LoadedCrewCount)
 	if (!bAPCEscaped)
 	{
 		bAPCEscaped = true;
+		ShowMissionEventOnScreen(TEXT("Евакуаційна машина залишила район"), FColor::Red);
 		FailFlag(TEXT("Bonus_DestroyAPC"));
 	}
 
@@ -339,6 +432,9 @@ void AMissionScenarioController::NotifyAPCEscaped(int32 LoadedCrewCount)
 		const int32 NewlyEscapedCrew = FMath::Min(LoadedCrewCount, RemainingCrewToResolve);
 
 		EscapedCrewCount += NewlyEscapedCrew;
+		ShowMissionEventOnScreen(
+			"Член екіпажу втік пішки"
+		);
 
 		const FName CrewFlagId = GetCrewBonusFlagIdForMission();
 
@@ -396,6 +492,7 @@ void AMissionScenarioController::NotifyFriendlyPositionDestroyed()
 	}
 
 	bFriendlyPositionDestroyed = true;
+	ShowMissionEventOnScreen(TEXT("Дружню позицію знищено"), FColor::Red);
 	FailFlag(TEXT("Primary_DefendFriendlyPosition"));
 
 	EvaluateMissionCompletion();
@@ -498,6 +595,7 @@ void AMissionScenarioController::ResetMissionRuntimeState()
 	MissionStartTimeSeconds = 0.0f;
 	MissionEndTimeSeconds = 0.0f;
 	bPrimaryObjectiveCompleted = false;
+	MissionFinishReason.Empty();
 
 	SPGVehicleScoreProgress = 0;
 	TankVehicleScoreProgress = 0;
@@ -724,9 +822,10 @@ void AMissionScenarioController::EvaluateAfterDroneUsed()
 		return;
 	}
 
+	ShowMissionEventOnScreen(TEXT("Використано всі доступні дрони"), FColor::Yellow);
+
 	FinishMission(bPrimaryObjectiveCompleted);
 }
-
 int32 AMissionScenarioController::GetAPCDestroyedScoreForMission() const
 {
 	if (MissionType == EMissionScenarioType::SPGStrike)
@@ -875,6 +974,7 @@ void AMissionScenarioController::EvaluateMissionCompletion()
 	{
 		if (IsMortarMissionFullyCompleted())
 		{
+			ShowMissionEventOnScreen(TEXT("Усі цілі на позиції знищено"), FColor::Green);
 			FinishMission(true);
 		}
 
@@ -891,6 +991,7 @@ void AMissionScenarioController::EvaluateMissionCompletion()
 
 		if (IsSPGMissionFullyCompleted())
 		{
+			ShowMissionEventOnScreen(TEXT("Умови завершення місії виконано"), FColor::Green);
 			FinishMission(true);
 		}
 
@@ -907,13 +1008,13 @@ void AMissionScenarioController::EvaluateMissionCompletion()
 
 		if (IsTankMissionFullyCompleted())
 		{
+			ShowMissionEventOnScreen(TEXT("Умови завершення місії виконано"), FColor::Green);
 			FinishMission(true);
 		}
 
 		return;
 	}
 }
-
 bool AMissionScenarioController::IsMortarMissionFullyCompleted() const
 {
 	return bMortarDestroyed && bAmmoCrateDestroyed && IsAllEnemyInfantryDestroyed();

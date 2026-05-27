@@ -145,6 +145,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Mission")
 	FText GetMissionTitle() const;
 
+	UFUNCTION(BlueprintCallable, Category = "Mission")
+	FString GetMissionFinishReason() const;
+
 	UFUNCTION(CallInEditor, Category = "Mission|Debug")
 	void DebugStartMission();
 
@@ -346,6 +349,11 @@ private:
 	bool bSPGNeutralized = false;
 	bool bTankNeutralized = false;
 
+	FString MissionFinishReason;
+
+	void SetMissionFinishReason(const FString& Reason);
+	void ShowMissionFinishReasonOnScreen(bool bSuccess) const;
+	void ShowMissionEventOnScreen(const FString& Message, const FColor& Color = FColor::White) const;
 
 	void ResetMissionRuntimeState();
 	void ConfigureDefaultFlags();
