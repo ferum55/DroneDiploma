@@ -41,15 +41,7 @@ AFPVDronePawn::AFPVDronePawn()
     PlaneMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PlaneMesh0"));
     PlaneMesh->SetStaticMesh(ConstructorStatics.PlaneMesh.Get());
     RootComponent = PlaneMesh;
-
-    PlaneMesh->SetNotifyRigidBodyCollision(true);
-    PlaneMesh->SetSimulatePhysics(true);
-    PlaneMesh->SetEnableGravity(true);
-    //PlaneMesh->SetLinearDamping(0.05f);
-    //PlaneMesh->SetAngularDamping(0.1f);
-    PlaneMesh->SetMassOverrideInKg(NAME_None, 4.5f);
     PlaneMesh->SetCollisionProfileName(TEXT("PhysicsActor"));
-    PlaneMesh->SetCenterOfMass(FVector::ZeroVector);
 
     Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera0"));
     Camera->SetupAttachment(PlaneMesh);
@@ -62,24 +54,6 @@ AFPVDronePawn::AFPVDronePawn()
     KillCamCamera->SetupAttachment(RootComponent);
     KillCamCamera->bUsePawnControlRotation = false;
     KillCamCamera->SetActive(false);
-
-    if (Camera)
-    {
-        if (Camera->PostProcessSettings.WeightedBlendables.Array.Num() > 0)
-        {
-            auto& Blendable = Camera->PostProcessSettings.WeightedBlendables.Array[0];
-
-            if (Blendable.Object)
-            {
-                FPVPostProcessMID = UMaterialInstanceDynamic::Create(
-                    Cast<UMaterialInterface>(Blendable.Object),
-                    this
-                );
-
-                Blendable.Object = FPVPostProcessMID;
-            }
-        }
-    }
 
     BatteryComponent = CreateDefaultSubobject<UFPVBatteryComponent>(TEXT("BatteryComponent"));
     SignalComponent = CreateDefaultSubobject<UDroneSignalComponent>(TEXT("SignalComponent"));
@@ -182,6 +156,14 @@ void AFPVDronePawn::BeginPlay()
 
     //PlaneMesh->SetLinearDamping(0.f);
     //PlaneMesh->SetAngularDamping(0.2f);
+    PlaneMesh->SetCollisionProfileName(TEXT("PhysicsActor"));
+    PlaneMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    PlaneMesh->SetCollisionObjectType(ECC_PhysicsBody);
+    PlaneMesh->SetCollisionResponseToAllChannels(ECR_Block);
+    PlaneMesh->SetNotifyRigidBodyCollision(true);
+    PlaneMesh->BodyInstance.SetInstanceNotifyRBCollision(true);
+    PlaneMesh->SetSimulatePhysics(true);
+    PlaneMesh->SetEnableGravity(true);
     PlaneMesh->SetMassOverrideInKg(NAME_None, 3.921f, true);
     PlaneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
     PlaneMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
@@ -190,13 +172,6 @@ void AFPVDronePawn::BeginPlay()
     PlaneMesh->SetCenterOfMass(FVector(-0.884f, -0.006f, -0.101f));
 
     //unsafe
-    PlaneMesh->SetCollisionProfileName(TEXT("PhysicsActor"));
-    PlaneMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-    PlaneMesh->SetCollisionObjectType(ECC_PhysicsBody);
-    PlaneMesh->SetCollisionResponseToAllChannels(ECR_Block);
-    PlaneMesh->SetNotifyRigidBodyCollision(true);
-    PlaneMesh->BodyInstance.SetInstanceNotifyRBCollision(true);
-
     PlaneMesh->OnComponentHit.RemoveDynamic(this, &AFPVDronePawn::OnHit);
     PlaneMesh->OnComponentHit.AddDynamic(this, &AFPVDronePawn::OnHit);
     //
