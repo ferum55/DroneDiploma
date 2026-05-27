@@ -160,10 +160,10 @@ private:
 	float VideoDistanceExtraLossStartM = 1000.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
-	float VideoDistanceExtraLossFullM = 4000.f;
+	float VideoDistanceExtraLossFullM = 8000.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
-	float VideoDistanceExtraMaxLossDb = 35.f;
+	float VideoDistanceExtraMaxLossDb = 25.f;
 
 	UPROPERTY(EditAnywhere, Category = "UAV|Signal")
 	float ControlMaxDisplayedRSSIDbm = -35.f;
